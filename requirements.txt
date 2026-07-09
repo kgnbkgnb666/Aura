@@ -1,0 +1,9 @@
+numpy>=1.26
+pyaudio>=0.2.14
+requests>=2.31
+PyYAML>=6.0
+PySide6>=6.7
+pynput>=1.7
+funasr>=1.2
+modelscope>=1.17
+torch>=2.3

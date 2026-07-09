@@ -1,0 +1,8 @@
+# 安装 FunASR 及相关依赖
+pip install funasr modelscope torch
+
+# 安装 PyAudio (音频采集)
+pip install pyaudio
+
+# 安装 pynput (键盘监听)
+pip install pynput
