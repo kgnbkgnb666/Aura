@@ -167,7 +167,7 @@ textarea {
 .settings-view {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto 1fr;
   background: #fbfaf7;
 }
 
@@ -263,8 +263,7 @@ textarea {
   grid-template-rows: auto 1fr;
 }
 
-.tabs,
-.settings-tabs {
+.tabs {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 6px;
@@ -272,12 +271,37 @@ textarea {
   border-bottom: 1px solid #e1e3df;
 }
 
-.tabs button,
-.settings-tabs button {
+.tabs button {
   min-width: 0;
 }
 
-.tabs button.active,
+.tabs button.active {
+  border-color: #3a8f82;
+  background: #eaf5f0;
+}
+
+.settings-content {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+}
+
+.settings-tabs {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 10px;
+  overflow: auto;
+  border-right: 1px solid #e1e3df;
+}
+
+.settings-tabs button {
+  justify-content: start;
+  min-width: 0;
+  padding: 0 9px;
+}
+
 .settings-tabs button.active {
   border-color: #3a8f82;
   background: #eaf5f0;
@@ -381,6 +405,99 @@ textarea {
 
 .mode-editor textarea {
   min-height: 180px;
+  border: 1px solid #c9d2cd;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.skill-manager {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  gap: 14px;
+}
+
+.skill-toolbar {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d9ddd8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.skill-toolbar label {
+  display: grid;
+  gap: 5px;
+  color: #59635f;
+  font-size: 12px;
+}
+
+.skill-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #d9ddd8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.skill-list p {
+  color: #65706b;
+  font-size: 12px;
+}
+
+.skill-list button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-content: start;
+  min-height: 52px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.skill-list button.active {
+  border-color: #3a8f82;
+  background: #eaf5f0;
+}
+
+.skill-list input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.skill-list span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.skill-list strong,
+.skill-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-list small {
+  color: #65706b;
+  font-size: 11px;
+}
+
+.skill-editor {
+  border: 1px solid #d9ddd8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.skill-editor textarea {
+  min-height: 120px;
   border: 1px solid #c9d2cd;
   border-radius: 6px;
   background: #ffffff;
@@ -650,10 +767,16 @@ footer {
   }
 
   .settings-tabs {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: 1fr;
   }
 
   .mode-manager {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-content,
+  .skill-manager,
+  .skill-toolbar {
     grid-template-columns: 1fr;
   }
 

@@ -27,6 +27,18 @@ export type Settings = {
   llm_temperature: number;
   llm_timeout_seconds: number;
   history_path: string | null;
+  skills: Skill[];
+  skill_scan_dir: string;
+};
+
+export type Skill = {
+  id: string;
+  name: string;
+  description: string;
+  example: string;
+  category: string;
+  enabled: boolean;
+  source_path: string;
 };
 
 export type DeviceInfo = {
@@ -67,6 +79,7 @@ export type AppState = {
     last_compiled: string;
     turn_count: number;
   }>;
+  skills: Skill[];
   service: {
     stt_provider: string;
     llm_provider: string;
@@ -168,6 +181,16 @@ export const api = {
     request<{ state: AppState }>("/api/modes", {
       method: "POST",
       body: JSON.stringify({ modes })
+    }),
+  scanSkills: (directory: string) =>
+    request<{ skills: Skill[]; state: AppState }>("/api/skills/scan", {
+      method: "POST",
+      body: JSON.stringify({ directory })
+    }),
+  saveSkills: (skills: Skill[], skillScanDir: string) =>
+    request<{ state: AppState }>("/api/skills/save", {
+      method: "POST",
+      body: JSON.stringify({ skills, skill_scan_dir: skillScanDir })
     }),
   saveGeneral: (payload: Partial<Settings>) =>
     request<{ state: AppState }>("/api/settings/general", {

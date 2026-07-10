@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .models import Settings
+from .models import Settings, Skill
 
 
 def app_data_dir(app_name: str = "Aura") -> Path:
@@ -49,6 +49,8 @@ class SettingsStore:
                     value = Path(value)
                 if key == "model_cache_dir" and value:
                     value = Path(value)
+                if key == "skills" and value:
+                    value = [Skill(**item) for item in value if isinstance(item, dict)]
                 setattr(settings, key, value)
         settings.app_name = "Aura"
         if source_path != self.path and settings.history_path:

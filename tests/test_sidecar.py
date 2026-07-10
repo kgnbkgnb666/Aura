@@ -117,3 +117,29 @@ def test_sidecar_load_session_restores_turn_context(tmp_path, monkeypatch):
     assert payload["state"]["current_session"]["id"] == session_id
     assert app.service.sessions.previous_transcripts() == ["first request", "second request"]
     assert app.service.sessions.previous_compiled_text() == "compiled second request"
+
+
+def test_sidecar_save_skills_updates_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = AuraSidecar(preload_stt=False)
+
+    payload = app.save_skills(
+        {
+            "skill_scan_dir": str(tmp_path / "skills"),
+            "skills": [
+                {
+                    "id": "doc",
+                    "name": "doc",
+                    "description": "Edit docx documents",
+                    "example": "Use when the user asks for a Word document.",
+                    "category": "Document",
+                    "enabled": True,
+                    "source_path": "",
+                }
+            ],
+        }
+    )
+
+    assert payload["state"]["skills"][0]["name"] == "doc"
+    assert payload["state"]["skills"][0]["enabled"] is True
+    assert app.service.settings.skill_scan_dir.endswith("skills")

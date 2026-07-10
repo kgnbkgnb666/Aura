@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import threading
 import time
@@ -12,7 +13,7 @@ from urllib.parse import urlparse
 
 from .compiler import PromptCompiler
 from .config import SettingsStore
-from .models import DeviceInfo, Mode, RecordingResult, Session, Settings
+from .models import DeviceInfo, Mode, RecordingResult, Session, Settings, Skill
 from .recorder import AudioRecorder
 from .runtime import ProcessingJobStore, RuntimeLog
 from .service import AuraService
@@ -45,6 +46,68 @@ def settings_payload(settings: Settings) -> JsonDict:
 
 def mode_payload(mode: Mode) -> JsonDict:
     return asdict(mode)
+
+
+def skill_payload(skill: Skill) -> JsonDict:
+    return asdict(skill)
+
+
+def _skill_id(name: str, source_path: str = "") -> str:
+    base = f"{name}:{source_path}".strip(":")
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()[:16]
+
+
+def _extract_skill(path: Path) -> Skill | None:
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    lines = [line.strip() for line in text.splitlines()]
+    name = path.parent.name
+    description = ""
+    examples: list[str] = []
+
+    for line in lines:
+        if line.startswith("# "):
+            name = line.lstrip("#").strip()
+            break
+
+    for index, line in enumerate(lines):
+        lower = line.lower()
+        if lower.startswith("description:"):
+            description = line.split(":", 1)[1].strip()
+            break
+        if "description" in lower and index + 1 < len(lines):
+            description = lines[index + 1].strip("- ").strip()
+            break
+    if not description:
+        for line in lines:
+            if line and not line.startswith("#"):
+                description = line.strip("- ").strip()
+                break
+
+    in_example = False
+    for line in lines:
+        lower = line.lower()
+        if "example" in lower or "示例" in line:
+            in_example = True
+            continue
+        if in_example:
+            if line.startswith("#") and examples:
+                break
+            if line:
+                examples.append(line.strip("- ").strip())
+            if len(examples) >= 4:
+                break
+
+    if not name or not description:
+        return None
+    return Skill(
+        id=_skill_id(name, str(path)),
+        name=name,
+        description=description,
+        example="\n".join(examples).strip(),
+        category=path.parent.parent.name if path.parent.parent != path.parent else "Imported",
+        enabled=True,
+        source_path=str(path),
+    )
 
 
 def session_payload(session: Session) -> JsonDict:
@@ -100,6 +163,7 @@ class AuraSidecar:
             return {
                 "settings": settings_payload(self.service.settings),
                 "modes": [mode_payload(mode) for mode in self.service.modes.all()],
+                "skills": [skill_payload(skill) for skill in self.service.settings.skills],
                 "current_mode": mode_payload(self.service.current_mode),
                 "current_session": session_payload(self.service.current_session),
                 "history": self.service.history.recent_sessions(),
@@ -190,6 +254,56 @@ class AuraSidecar:
             self.settings_store.save(self.service.settings)
             self.latest_status = f"默认模式: {default_mode.name}"
             self.logs.info("settings", "Modes saved")
+            return {"state": self.state()}
+
+    def scan_skills(self, payload: JsonDict) -> JsonDict:
+        directory = Path(str(payload.get("directory") or "")).expanduser()
+        if not directory.exists() or not directory.is_dir():
+            raise ValueError("Skill directory does not exist.")
+        found: list[Skill] = []
+        for path in directory.rglob("SKILL.md"):
+            skill = _extract_skill(path)
+            if skill:
+                found.append(skill)
+        with self._lock:
+            existing = {skill.id: skill for skill in self.service.settings.skills}
+            for skill in found:
+                existing[skill.id] = skill
+            self.service.settings.skills = list(existing.values())
+            self.service.settings.skill_scan_dir = str(directory)
+            self.settings_store.save(self.service.settings)
+            self.latest_status = f"已提取 {len(found)} 个 Skill"
+            self.logs.info("settings", f"Scanned skills: {len(found)}")
+            return {"skills": [skill_payload(skill) for skill in found], "state": self.state()}
+
+    def save_skills(self, payload: JsonDict) -> JsonDict:
+        raw_skills = payload.get("skills") or []
+        skills: list[Skill] = []
+        for item in raw_skills:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            description = str(item.get("description") or "").strip()
+            if not name or not description:
+                raise ValueError("Skill name and description are required.")
+            source_path = str(item.get("source_path") or "").strip()
+            skills.append(
+                Skill(
+                    id=str(item.get("id") or _skill_id(name, source_path)),
+                    name=name,
+                    description=description,
+                    example=str(item.get("example") or "").strip(),
+                    category=str(item.get("category") or "Custom").strip(),
+                    enabled=bool(item.get("enabled", True)),
+                    source_path=source_path,
+                )
+            )
+        with self._lock:
+            self.service.settings.skills = skills
+            self.service.settings.skill_scan_dir = str(payload.get("skill_scan_dir") or self.service.settings.skill_scan_dir)
+            self.settings_store.save(self.service.settings)
+            self.latest_status = "Skill 配置已保存"
+            self.logs.info("settings", "Skills saved")
             return {"state": self.state()}
 
     def save_general_settings(self, payload: JsonDict) -> JsonDict:
@@ -421,6 +535,8 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
                     "/api/session/load": app.load_session,
                     "/api/mode": app.set_mode,
                     "/api/modes": app.save_modes,
+                    "/api/skills/scan": app.scan_skills,
+                    "/api/skills/save": app.save_skills,
                     "/api/settings/general": app.save_general_settings,
                     "/api/settings/speech": app.save_speech_settings,
                     "/api/settings/llm": app.save_llm_settings,

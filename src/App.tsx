@@ -19,9 +19,9 @@ import {
   Terminal,
   Trash2
 } from "lucide-react";
-import { AppState, DeviceInfo, LogEntry, Mode, Settings, api, ensureSidecar } from "./api";
+import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, ensureSidecar } from "./api";
 
-type Tab = "main" | "speech" | "llm" | "modes" | "shortcuts" | "logs" | "history";
+type Tab = "main" | "speech" | "llm" | "modes" | "skills" | "shortcuts" | "logs" | "history";
 
 const emptySettings: Settings = {
   app_name: "Aura",
@@ -40,7 +40,9 @@ const emptySettings: Settings = {
   llm_model: "",
   llm_temperature: 0.2,
   llm_timeout_seconds: 60,
-  history_path: null
+  history_path: null,
+  skills: [],
+  skill_scan_dir: ""
 };
 
 function compactText(value: string, limit = 34) {
@@ -58,6 +60,10 @@ function shortTime(value: string) {
   });
 }
 
+function stateSkills(state: AppState) {
+  return state.skills || state.settings.skills || [];
+}
+
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -73,6 +79,8 @@ export default function App() {
   const [micTestCountdown, setMicTestCountdown] = useState(0);
   const [micTestActive, setMicTestActive] = useState(false);
   const [modeDrafts, setModeDrafts] = useState<Mode[]>([]);
+  const [skillDrafts, setSkillDrafts] = useState<Skill[]>([]);
+  const [skillScanDir, setSkillScanDir] = useState("");
   const [speechTestResult, setSpeechTestResult] = useState("");
   const recordingRef = useRef(false);
 
@@ -111,6 +119,8 @@ export default function App() {
           setState(next);
           setDraft(next.settings);
           setModeDrafts(next.modes);
+          setSkillDrafts(stateSkills(next));
+          setSkillScanDir(next.settings.skill_scan_dir || "");
           setTranscript(restored?.transcript || "");
           setCompiled(restored?.compiled || "");
           setCopied(false);
@@ -367,6 +377,30 @@ export default function App() {
     setModeDrafts(payload.state.modes);
   }
 
+  async function scanSkills() {
+    try {
+      setError("");
+      const payload = await api.scanSkills(skillScanDir);
+      setState(payload.state);
+      setDraft(payload.state.settings);
+      setSkillDrafts(stateSkills(payload.state));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    }
+  }
+
+  async function saveSkills() {
+    try {
+      setError("");
+      const payload = await api.saveSkills(skillDrafts, skillScanDir);
+      setState(payload.state);
+      setDraft(payload.state.settings);
+      setSkillDrafts(stateSkills(payload.state));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    }
+  }
+
   async function warmup() {
     const payload = await api.warmupStt();
     setState(payload.state);
@@ -429,7 +463,11 @@ export default function App() {
   }, [state?.runtime.volume]);
 
   function openSettings(tab: Tab = "speech") {
-    if (state) setModeDrafts(state.modes);
+    if (state) {
+      setModeDrafts(state.modes);
+      setSkillDrafts(stateSkills(state));
+      setSkillScanDir(state.settings.skill_scan_dir || "");
+    }
     setActiveTab(tab);
   }
 
@@ -460,33 +498,38 @@ export default function App() {
               <span>{selectedMode?.name || "Mode"}</span>
             </div>
           </header>
-          <nav className="settings-tabs">
-            <button className={activeTab === "speech" ? "active" : ""} onClick={() => setActiveTab("speech")}>
-              <Mic size={15} />
-              <span>语音</span>
-            </button>
-            <button className={activeTab === "llm" ? "active" : ""} onClick={() => setActiveTab("llm")}>
-              <SlidersHorizontal size={15} />
-              <span>LLM</span>
-            </button>
-            <button className={activeTab === "modes" ? "active" : ""} onClick={() => setActiveTab("modes")}>
-              <GripVertical size={15} />
-              <span>模式</span>
-            </button>
-            <button className={activeTab === "shortcuts" ? "active" : ""} onClick={() => setActiveTab("shortcuts")}>
-              <Keyboard size={15} />
-              <span>快捷键</span>
-            </button>
-            <button className={activeTab === "logs" ? "active" : ""} onClick={() => setActiveTab("logs")}>
-              <Terminal size={15} />
-              <span>日志</span>
-            </button>
-            <button className={activeTab === "history" ? "active" : ""} onClick={() => setActiveTab("history")}>
-              <History size={15} />
-              <span>历史</span>
-            </button>
-          </nav>
-          <div className="settings-page">
+          <div className="settings-content">
+            <nav className="settings-tabs">
+              <button className={activeTab === "speech" ? "active" : ""} onClick={() => setActiveTab("speech")}>
+                <Mic size={15} />
+                <span>语音</span>
+              </button>
+              <button className={activeTab === "llm" ? "active" : ""} onClick={() => setActiveTab("llm")}>
+                <SlidersHorizontal size={15} />
+                <span>LLM</span>
+              </button>
+              <button className={activeTab === "modes" ? "active" : ""} onClick={() => setActiveTab("modes")}>
+                <GripVertical size={15} />
+                <span>模式</span>
+              </button>
+              <button className={activeTab === "skills" ? "active" : ""} onClick={() => setActiveTab("skills")}>
+                <Cpu size={15} />
+                <span>Skill 配置</span>
+              </button>
+              <button className={activeTab === "shortcuts" ? "active" : ""} onClick={() => setActiveTab("shortcuts")}>
+                <Keyboard size={15} />
+                <span>快捷键</span>
+              </button>
+              <button className={activeTab === "logs" ? "active" : ""} onClick={() => setActiveTab("logs")}>
+                <Terminal size={15} />
+                <span>日志</span>
+              </button>
+              <button className={activeTab === "history" ? "active" : ""} onClick={() => setActiveTab("history")}>
+                <History size={15} />
+                <span>历史</span>
+              </button>
+            </nav>
+            <div className="settings-page">
             {activeTab === "speech" ? (
               <SpeechSettings
                 draft={draft}
@@ -510,9 +553,20 @@ export default function App() {
             {activeTab === "modes" ? (
               <ModeSettings modes={modeDrafts} onModes={setModeDrafts} onSave={saveModes} />
             ) : null}
+            {activeTab === "skills" ? (
+              <SkillSettings
+                skills={skillDrafts}
+                skillScanDir={skillScanDir}
+                onSkillScanDir={setSkillScanDir}
+                onSkills={setSkillDrafts}
+                onScan={scanSkills}
+                onSave={saveSkills}
+              />
+            ) : null}
             {activeTab === "shortcuts" ? <ShortcutsPanel /> : null}
             {activeTab === "logs" ? <LogsPanel logs={logs} onRefresh={loadLogs} onClear={clearLogs} /> : null}
             {activeTab === "history" ? <HistoryPanel state={state} onClear={clearHistory} /> : null}
+            </div>
           </div>
         </section>
       </main>
@@ -848,6 +902,141 @@ function ModeSettings({
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function SkillSettings({
+  skills,
+  skillScanDir,
+  onSkillScanDir,
+  onSkills,
+  onScan,
+  onSave
+}: {
+  skills: Skill[];
+  skillScanDir: string;
+  onSkillScanDir: (value: string) => void;
+  onSkills: (skills: Skill[]) => void;
+  onScan: () => void;
+  onSave: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState(skills[0]?.id || "");
+  const selectedSkill = skills.find((skill) => skill.id === selectedId) || skills[0];
+
+  useEffect(() => {
+    if (!skills.length) return;
+    if (!selectedId || !skills.some((skill) => skill.id === selectedId)) {
+      setSelectedId(skills[0].id);
+    }
+  }, [skills, selectedId]);
+
+  function nextSkillId(name: string) {
+    const base = (name || "custom_skill").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "custom_skill";
+    let candidate = base;
+    let index = 2;
+    while (skills.some((skill) => skill.id === candidate)) {
+      candidate = `${base}_${index}`;
+      index += 1;
+    }
+    return candidate;
+  }
+
+  function addSkill() {
+    const skill: Skill = {
+      id: nextSkillId("custom_skill"),
+      name: "custom_skill",
+      description: "",
+      example: "",
+      category: "Custom",
+      enabled: true,
+      source_path: ""
+    };
+    onSkills([...skills, skill]);
+    setSelectedId(skill.id);
+  }
+
+  function updateSkill(patch: Partial<Skill>) {
+    if (!selectedSkill) return;
+    onSkills(skills.map((skill) => (skill.id === selectedSkill.id ? { ...skill, ...patch } : skill)));
+  }
+
+  function deleteSkill(id: string) {
+    const nextSkills = skills.filter((skill) => skill.id !== id);
+    onSkills(nextSkills);
+    setSelectedId(nextSkills[0]?.id || "");
+  }
+
+  return (
+    <div className="skill-manager">
+      <section className="skill-toolbar">
+        <label>
+          <span>Skill 目录</span>
+          <input value={skillScanDir} onChange={(event) => onSkillScanDir(event.target.value)} placeholder="例如 C:\\Users\\kg\\.codex\\skills" />
+        </label>
+        <div className="button-row">
+          <button onClick={onScan}>
+            <RefreshCcw size={15} />
+            <span>自动提取</span>
+          </button>
+          <button onClick={addSkill}>
+            <Plus size={15} />
+            <span>手动添加</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="skill-list">
+        {skills.length === 0 ? <p>暂无 Skill，可输入目录自动提取，或手动添加。</p> : null}
+        {skills.map((skill) => (
+          <button className={skill.id === selectedSkill?.id ? "active" : ""} key={skill.id} onClick={() => setSelectedId(skill.id)}>
+            <input
+              type="checkbox"
+              checked={skill.enabled}
+              onChange={(event) => {
+                event.stopPropagation();
+                onSkills(skills.map((item) => (item.id === skill.id ? { ...item, enabled: event.target.checked } : item)));
+              }}
+              onClick={(event) => event.stopPropagation()}
+            />
+            <span>
+              <strong>{skill.name}</strong>
+              <small>{skill.category}</small>
+            </span>
+          </button>
+        ))}
+      </section>
+
+      {selectedSkill ? (
+        <section className="skill-editor settings-body">
+          <label>
+            <span>名称</span>
+            <input value={selectedSkill.name} onChange={(event) => updateSkill({ name: event.target.value })} />
+          </label>
+          <label>
+            <span>分类</span>
+            <input value={selectedSkill.category} onChange={(event) => updateSkill({ category: event.target.value })} />
+          </label>
+          <label>
+            <span>描述</span>
+            <textarea value={selectedSkill.description} onChange={(event) => updateSkill({ description: event.target.value })} />
+          </label>
+          <label>
+            <span>使用示例</span>
+            <textarea value={selectedSkill.example} onChange={(event) => updateSkill({ example: event.target.value })} />
+          </label>
+          <div className="button-row">
+            <button onClick={onSave}>
+              <Check size={15} />
+              <span>保存 Skill</span>
+            </button>
+            <button onClick={() => deleteSkill(selectedSkill.id)}>
+              <Trash2 size={15} />
+              <span>删除</span>
+            </button>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

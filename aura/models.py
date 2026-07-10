@@ -26,6 +26,17 @@ class Mode:
 
 
 @dataclass(slots=True)
+class Skill:
+    id: str
+    name: str
+    description: str
+    example: str = ""
+    category: str = "Custom"
+    enabled: bool = True
+    source_path: str = ""
+
+
+@dataclass(slots=True)
 class Settings:
     app_name: str = "Aura"
     mode_id: str = "coding_agent"
@@ -44,6 +55,8 @@ class Settings:
     llm_temperature: float = 0.2
     llm_timeout_seconds: int = 60
     history_path: Path | None = None
+    skills: list[Skill] = field(default_factory=list)
+    skill_scan_dir: str = ""
 
 
 @dataclass(slots=True)
@@ -109,18 +122,48 @@ class CompileRequest:
     previous_compiled_text: str = ""
     previous_transcripts: list[str] = field(default_factory=list)
     user_preferences: str = ""
+    skills: list[Skill] = field(default_factory=list)
 
     def as_messages(self) -> list[dict[str, str]]:
         history = "\n".join(
             f"{index + 1}. {text}" for index, text in enumerate(self.previous_transcripts)
         )
+        enabled_skills = [skill for skill in self.skills if skill.enabled]
+        skill_lines: list[str] = []
+        for index, skill in enumerate(enabled_skills, start=1):
+            parts = [
+                f"{index}. {skill.name}",
+                f"分类: {skill.category}",
+                f"描述: {skill.description}",
+            ]
+            if skill.example.strip():
+                parts.append(f"使用示例: {skill.example.strip()}")
+            skill_lines.append("\n".join(parts))
+
+        system_prompt = self.mode.system_prompt
+        if enabled_skills:
+            system_prompt = (
+                f"{system_prompt.strip()}\n\n"
+                "可用 Skill 调用规则：根据用户当前需求和下列 Skill 的名称、描述、使用示例，"
+                "判断最终 prompt 是否需要明确调用某个 Skill。"
+                "如果需要，请在编译结果中自然写明应使用的 Skill 名称和必要上下文；"
+                "如果不需要，不要强行提及 Skill。"
+            )
         user_parts = [
             "请把下面的语音转录整理成可直接发送给目标 agent 的 prompt。",
             "",
             f"目标模式：{self.mode.name}",
         ]
-        if self.user_preferences:
-            user_parts.extend(["", "用户偏好：", self.user_preferences])
+        if enabled_skills:
+            user_parts.extend(
+                [
+                    "",
+                    "当前可使用 Skill（名称、描述、使用示例）：",
+                    "\n\n".join(skill_lines),
+                    "",
+                    "请参考 Skill 的使用示例：当用户需求匹配某个 Skill 时，在最终编译结果中添加或引用该 Skill；不匹配时不要添加。",
+                ]
+            )
         if history:
             user_parts.extend(["", "本会话之前的原始转录：", history])
         if self.previous_compiled_text:
@@ -133,7 +176,7 @@ class CompileRequest:
             )
         user_parts.extend(["", "本次原始语音转录：", self.current_transcript.strip()])
         return [
-            {"role": "system", "content": self.mode.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": "\n".join(user_parts).strip()},
         ]
 

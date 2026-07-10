@@ -102,6 +102,7 @@ class AuraService:
             current_transcript=transcript,
             previous_compiled_text=self.sessions.previous_compiled_text(),
             previous_transcripts=self.sessions.previous_transcripts(),
+            skills=self.settings.skills,
         )
         parts: list[str] = []
         for chunk in self.compiler.stream_compile(request):

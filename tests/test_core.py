@@ -2,7 +2,7 @@ from pathlib import Path
 
 from aura.compiler import PromptCompiler
 from aura.history import HistoryStore
-from aura.models import CompileRequest, Session
+from aura.models import CompileRequest, Session, Skill
 from aura.modes import ModeRegistry
 from aura.providers.llm import RuleBasedCompiler
 from aura.providers.stt.model_cache import (
@@ -39,6 +39,29 @@ def test_compile_request_includes_previous_context():
     messages = request.as_messages()
     assert "上一版 AI 编译结果" in messages[-1]["content"]
     assert "整合后的完整 prompt" in messages[-1]["content"]
+
+
+def test_compile_request_includes_enabled_skills():
+    mode = ModeRegistry(Path("modes")).load().get("codex")
+    request = CompileRequest(
+        mode=mode,
+        current_transcript="帮我整理成专利交底书",
+        skills=[
+            Skill(
+                id="patent",
+                name="patent-disclosure-writer",
+                description="生成专利申请技术交底书",
+                example="当用户描述创新点时调用该 Skill。",
+                category="Writing",
+                enabled=True,
+            )
+        ],
+    )
+    messages = request.as_messages()
+    assert "可用 Skill 调用规则" in messages[0]["content"]
+    assert "patent-disclosure-writer" in messages[-1]["content"]
+    assert "生成专利申请技术交底书" in messages[-1]["content"]
+    assert "当用户描述创新点时调用该 Skill。" in messages[-1]["content"]
 
 
 def test_history_store_roundtrip(tmp_path):
