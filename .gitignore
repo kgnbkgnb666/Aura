@@ -1,15 +1,68 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.env
+.env.*
+!.env.example
 .venv/
 venv/
-*.egg-info/
+env/
+
+# Frontend / build output
+node_modules/
 dist/
 build/
-.env
-*.log
-*.sqlite
-*.wav
-!voice/test_mic.wav
-models/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
+# Tauri / Rust build output
+src-tauri/gen/
+src-tauri/target/
+
+# Models and generated ML assets
+models/
+*.ckpt
+*.bin
+*.onnx
+*.pt
+*.pth
+*.safetensors
+
+# User data, history, local runtime output
+config.json
+history.sqlite
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.log
+.tmp/
+
+# Local tool/editor metadata
+.codegraph/
+.playwright-mcp/
+.agents/
+.obsidian/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Personal notes / local runbooks
+codex提示词.txt
+启动命令.md

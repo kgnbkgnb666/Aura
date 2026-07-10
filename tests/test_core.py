@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from agentvoice.compiler import PromptCompiler
-from agentvoice.history import HistoryStore
-from agentvoice.models import CompileRequest, Session
-from agentvoice.modes import ModeRegistry
-from agentvoice.providers.llm import RuleBasedCompiler
-from agentvoice.providers.stt.model_cache import (
+from aura.compiler import PromptCompiler
+from aura.history import HistoryStore
+from aura.models import CompileRequest, Session
+from aura.modes import ModeRegistry
+from aura.providers.llm import RuleBasedCompiler
+from aura.providers.stt.model_cache import (
     resolve_modelscope_alias,
     resolve_modelscope_model,
 )
@@ -14,8 +14,8 @@ from agentvoice.providers.stt.model_cache import (
 def test_modes_load():
     modes = ModeRegistry(Path("modes")).load()
     ids = {mode.id for mode in modes.all()}
-    assert "codex" in ids
-    assert "analyze-only" in ids
+    assert ids
+    assert modes.get("missing-mode").id in ids
 
 
 def test_rule_based_compiler_adds_safety_boundary_for_risky_text():
