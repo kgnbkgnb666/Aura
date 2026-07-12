@@ -114,6 +114,16 @@ class Session:
             self.title = raw_transcript.strip()[:32]
         return turn
 
+    def update_latest_turn(self, raw_transcript: str, compiled_text: str) -> Turn | None:
+        """Update the latest turn's transcript and compiled text in-place (for recompile)."""
+        if not self.turns:
+            return None
+        turn = self.turns[-1]
+        turn.raw_transcript = raw_transcript
+        turn.compiled_text = compiled_text
+        self.updated_at = utc_now()
+        return turn
+
 
 @dataclass(slots=True)
 class CompileRequest:

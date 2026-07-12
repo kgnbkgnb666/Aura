@@ -86,7 +86,12 @@ class HistoryStore:
                     mode_id, stt_provider, llm_provider, created_at
                 )
                 values(?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(id) do nothing
+                on conflict(id) do update set
+                    raw_transcript=excluded.raw_transcript,
+                    compiled_text=excluded.compiled_text,
+                    mode_id=excluded.mode_id,
+                    stt_provider=excluded.stt_provider,
+                    llm_provider=excluded.llm_provider
                 """,
                 (
                     turn.id,

@@ -83,6 +83,7 @@ export default function App() {
   const [skillScanDir, setSkillScanDir] = useState("");
   const [speechTestResult, setSpeechTestResult] = useState("");
   const recordingRef = useRef(false);
+  const transcriptEditedByUser = useRef(false);
 
   const status = error || state?.runtime.status || "启动中";
   const selectedMode = state?.current_mode;
@@ -200,6 +201,7 @@ export default function App() {
       setCopied(false);
       setTranscript("");
       setCompiled("");
+      transcriptEditedByUser.current = false;
       recordingRef.current = true;
       const payload = await api.startRecording();
       setState(payload.state);
@@ -247,7 +249,9 @@ export default function App() {
         if (cancelled) return;
         setState(payload.state);
         setError(payload.job.error);
-        setTranscript(payload.job.transcript);
+        if (!transcriptEditedByUser.current) {
+          setTranscript(payload.job.transcript);
+        }
         setCompiled(payload.job.compiled);
         if (payload.job.done) {
           setBusy(false);
@@ -283,7 +287,10 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code === "Space" && !event.repeat && activeTab === "main") {
+      const editing = ["textarea", "input"].includes(
+        (document.activeElement?.tagName || "").toLowerCase()
+      );
+      if (event.code === "Space" && !event.repeat && activeTab === "main" && !editing) {
         event.preventDefault();
         startRecording();
       }
@@ -304,7 +311,10 @@ export default function App() {
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === "Space" && activeTab === "main") {
+      const editing = ["textarea", "input"].includes(
+        (document.activeElement?.tagName || "").toLowerCase()
+      );
+      if (event.code === "Space" && activeTab === "main" && !editing) {
         event.preventDefault();
         stopRecording();
       }
@@ -353,6 +363,21 @@ export default function App() {
     if (!compiled.trim()) return;
     await navigator.clipboard.writeText(compiled);
     setCopied(true);
+  }
+
+  async function recompile() {
+    if (!transcript.trim() || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const payload = await api.compile(transcript);
+      setCompiled(payload.compiled);
+      setState(payload.state);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveGeneral() {
@@ -617,9 +642,24 @@ export default function App() {
           <div className="text-pane">
             <div className="pane-head">
               <span>原始转录</span>
-              {state.runtime.recording ? <Mic size={16} /> : null}
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                {state.runtime.recording ? <Mic size={16} /> : null}
+                <button
+                  title="重新编译"
+                  disabled={!transcript.trim() || busy}
+                  onClick={recompile}
+                >
+                  <RefreshCcw size={14} />
+                  <span>重新编译</span>
+                </button>
+              </div>
             </div>
-            <textarea value={transcript} readOnly placeholder=" " />
+            <textarea
+              value={transcript}
+              onChange={(e) => { setTranscript(e.target.value); transcriptEditedByUser.current = true; }}
+              onBlur={() => api.updateTurn(transcript, compiled).catch(() => {})}
+              placeholder=" "
+            />
           </div>
           <div className={`text-pane result-pane ${copied ? "copied" : ""}`}>
             <div className="pane-head">
@@ -629,7 +669,12 @@ export default function App() {
                 <span>{copied ? "已复制" : "复制"}</span>
               </button>
             </div>
-            <textarea value={compiled} readOnly placeholder=" " />
+            <textarea
+              value={compiled}
+              onChange={(e) => setCompiled(e.target.value)}
+              onBlur={() => api.updateTurn(transcript, compiled).catch(() => {})}
+              placeholder=" "
+            />
           </div>
         </div>
 
