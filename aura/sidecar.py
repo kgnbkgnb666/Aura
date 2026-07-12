@@ -464,6 +464,28 @@ class AuraSidecar:
         self.logs.info("stt", "Test transcription completed", text)
         return {"transcript": text, "state": self.state()}
 
+    def update_latest_turn(self, payload: JsonDict) -> JsonDict:
+        transcript = str(payload.get("transcript") or "").strip()
+        compiled = str(payload.get("compiled") or "").strip()
+        if not transcript and not compiled:
+            return {"state": self.state()}
+        turn = self.service.current_session.update_latest_turn(
+            raw_transcript=transcript,
+            compiled_text=compiled,
+        )
+        if turn and self.service.settings.save_history:
+            self.service.history.save_session(self.service.current_session)
+        return {"state": self.state()}
+
+    def compile_text(self, payload: JsonDict) -> JsonDict:
+        transcript = str(payload.get("transcript") or "").strip()
+        if not transcript:
+            raise ValueError("transcript is required")
+        compiled = self.service.compile_only(transcript)
+        self.set_status("重新编译完成")
+        self.logs.info("llm", "Recompile completed", compiled[:1200])
+        return {"transcript": transcript, "compiled": compiled, "state": self.state()}
+
     def clear_history(self) -> JsonDict:
         with self._lock:
             self.service.history.clear()
@@ -540,6 +562,8 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
                     "/api/settings/general": app.save_general_settings,
                     "/api/settings/speech": app.save_speech_settings,
                     "/api/settings/llm": app.save_llm_settings,
+                    "/api/compile": app.compile_text,
+                    "/api/turn/update": app.update_latest_turn,
                     "/api/record/start": lambda _: app.start_recording(),
                     "/api/record/stop": lambda _: app.stop_recording(),
                     "/api/stt/warmup": lambda _: app.warm_up_stt(),

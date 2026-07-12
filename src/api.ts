@@ -209,6 +209,16 @@ export const api = {
     }),
   warmupStt: () =>
     request<{ state: AppState }>("/api/stt/warmup", { method: "POST", body: "{}" }),
+  compile: (transcript: string) =>
+    request<{ transcript: string; compiled: string; state: AppState }>("/api/compile", {
+      method: "POST",
+      body: JSON.stringify({ transcript })
+    }),
+  updateTurn: (transcript: string, compiled: string) =>
+    request<{ state: AppState }>("/api/turn/update", {
+      method: "POST",
+      body: JSON.stringify({ transcript, compiled })
+    }),
   testMicrophone: () =>
     request<{ recording: RecordingResult; state: AppState }>("/api/microphone/test", {
       method: "POST",
