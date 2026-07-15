@@ -21,6 +21,8 @@ def test_sidecar_state_has_frontend_contract(tmp_path, monkeypatch):
     assert state["runtime"]["latest_job_id"] == ""
     assert state["runtime"]["log_count"] >= 1
     assert "llm_provider" in state["service"]
+    assert state["service"]["transcriber_status"] == "not_loaded"
+    assert state["service"]["transcriber_progress"] == 0
 
 
 def test_sidecar_job_contract(tmp_path, monkeypatch):
@@ -117,6 +119,71 @@ def test_sidecar_load_session_restores_turn_context(tmp_path, monkeypatch):
     assert payload["state"]["current_session"]["id"] == session_id
     assert app.service.sessions.previous_transcripts() == ["first request", "second request"]
     assert app.service.sessions.previous_compiled_text() == "compiled second request"
+
+
+def test_recompile_overwrites_latest_turn_without_adding_memory(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = AuraSidecar(preload_stt=False)
+    session = app.service.current_session
+    original = session.add_turn(
+        raw_transcript="old transcript",
+        compiled_text="old compiled text",
+        stt_provider="test-stt",
+        llm_provider="test-llm",
+    )
+
+    app.update_latest_turn({"transcript": "edited transcript", "compiled": "edited compiled text"})
+    payload = app.compile_text({"transcript": "edited transcript"})
+
+    assert len(session.turns) == 1
+    assert session.turns[0].id == original.id
+    assert session.turns[0].raw_transcript == "edited transcript"
+    assert session.turns[0].compiled_text == payload["compiled"]
+    assert payload["state"]["current_session"]["turn_count"] == 1
+
+
+def test_manual_compiled_edit_overwrites_history_memory(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = AuraSidecar(preload_stt=False)
+    session = app.service.current_session
+    original = session.add_turn(
+        raw_transcript="original transcript",
+        compiled_text="original compiled text",
+        stt_provider="test-stt",
+        llm_provider="test-llm",
+    )
+    app.service.history.save_session(session)
+
+    payload = app.update_latest_turn(
+        {"transcript": "original transcript", "compiled": "manually edited result"}
+    )
+
+    assert len(session.turns) == 1
+    assert session.turns[0].id == original.id
+    assert session.turns[0].compiled_text == "manually edited result"
+    assert app.service.history.recent_sessions()[0]["last_compiled"] == "manually edited result"
+    assert payload["state"]["current_session"]["turn_count"] == 1
+
+
+def test_delete_history_removes_one_session_and_replaces_current(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = AuraSidecar(preload_stt=False)
+    session = app.service.current_session
+    session.add_turn(
+        raw_transcript="session to delete",
+        compiled_text="compiled",
+        stt_provider="test-stt",
+        llm_provider="test-llm",
+    )
+    app.service.history.save_session(session)
+    deleted_session_id = session.id
+
+    payload = app.delete_history({"session_id": deleted_session_id})
+
+    assert payload["deleted"] is True
+    assert payload["deleted_current"] is True
+    assert payload["state"]["current_session"]["id"] != deleted_session_id
+    assert payload["state"]["history"] == []
 
 
 def test_sidecar_save_skills_updates_settings(tmp_path, monkeypatch):

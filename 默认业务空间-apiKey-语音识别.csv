@@ -1,0 +1,8 @@
+﻿id,6146423
+apiKey,sk-ws-H.EDLELHI.aW8m.MEYCIQDrFcufwGCY2M4J2R6SgKrACZcWelRiPUMhggLyzI3lUAIhAOz_O8YrQWd4O_ImmEAKwm-LWJsY6hli1Y02USxrfSQv
+apiHost,llm-4rkfudsofe7t8wfe.cn-beijing.maas.aliyuncs.com
+openAiCompatible,https://llm-4rkfudsofe7t8wfe.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+dashScope,https://llm-4rkfudsofe7t8wfe.cn-beijing.maas.aliyuncs.com/api/v1
+description,STT语音识别
+workspaceName,默认业务空间
+workspaceId,llm-4rkfudsofe7t8wfe

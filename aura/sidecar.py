@@ -172,6 +172,9 @@ class AuraSidecar:
                     "llm_provider": self.service.compiler.llm.name,
                     "transcriber": self.service.transcriber.name,
                     "transcriber_ready": self.service.transcriber.is_ready,
+                    "transcriber_status": self.service.transcriber.status,
+                    "transcriber_progress": self.service.transcriber.progress,
+                    "transcriber_error": self.service.transcriber.last_error,
                 },
                 "runtime": {
                     "status": self.latest_status,
@@ -493,6 +496,23 @@ class AuraSidecar:
             self.logs.warning("history", "History cleared")
             return {"state": self.state()}
 
+    def delete_history(self, payload: JsonDict) -> JsonDict:
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        with self._lock:
+            deleted_current = self.service.current_session.id == session_id
+            deleted = self.service.history.delete_session(session_id)
+            if deleted_current:
+                self.service.new_session(self.service.current_mode.id)
+            self.latest_status = "历史记录已删除" if deleted else "历史记录不存在"
+            self.logs.info("history", f"History deleted: {session_id}")
+            return {
+                "deleted": deleted,
+                "deleted_current": deleted_current,
+                "state": self.state(),
+            }
+
     def recent_logs(self) -> JsonDict:
         return {"logs": self.logs.recent(), "state": self.state()}
 
@@ -531,7 +551,7 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
             path = urlparse(self.path).path
             try:
                 if path == "/api/health":
-                    self._send({"ok": True, "app": "Aura", "api_version": 2})
+                    self._send({"ok": True, "app": "Aura", "api_version": 3})
                 elif path == "/api/state":
                     self._send(app.state())
                 elif path == "/api/devices":
@@ -569,6 +589,7 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
                     "/api/stt/warmup": lambda _: app.warm_up_stt(),
                     "/api/microphone/test": app.test_microphone,
                     "/api/transcribe/test": lambda _: app.transcribe_test_audio(),
+                    "/api/history/delete": app.delete_history,
                     "/api/history/clear": lambda _: app.clear_history(),
                     "/api/logs/clear": lambda _: app.clear_logs(),
                 }

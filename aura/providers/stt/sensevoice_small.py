@@ -30,11 +30,16 @@ class SenseVoiceSmallTranscriber:
         self._model = None
         self._lock = threading.Lock()
         self._status = "not_loaded"
+        self._progress = 0
         self._last_error = ""
 
     @property
     def status(self) -> str:
         return self._status
+
+    @property
+    def progress(self) -> int:
+        return self._progress
 
     @property
     def last_error(self) -> str:
@@ -47,6 +52,7 @@ class SenseVoiceSmallTranscriber:
     def load_model(self, status_callback: StatusCallback | None = None) -> None:
         if self._model is not None:
             self._status = "ready"
+            self._progress = 100
             if status_callback:
                 status_callback("SenseVoice-Small 模型已就绪")
             return
@@ -54,15 +60,18 @@ class SenseVoiceSmallTranscriber:
         with self._lock:
             if self._model is not None:
                 self._status = "ready"
+                self._progress = 100
                 if status_callback:
                     status_callback("SenseVoice-Small 模型已就绪")
                 return
 
             self._status = "loading"
+            self._progress = 5
             self._last_error = ""
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             modelscope_cache = self.cache_dir / "modelscope"
             modelscope_cache.mkdir(parents=True, exist_ok=True)
+            self._progress = 15
             os.environ["MODELSCOPE_CACHE"] = str(modelscope_cache)
             os.environ["MODELSCOPE_MODULES_CACHE"] = str(modelscope_cache / "modules")
             os.environ.setdefault("MODELSCOPE_OFFLINE", "0")
@@ -73,33 +82,40 @@ class SenseVoiceSmallTranscriber:
                 )
 
             try:
+                self._progress = 25
                 from funasr import AutoModel
             except ImportError as exc:
                 self._status = "error"
+                self._progress = 0
                 self._last_error = "FunASR is not installed."
                 raise RuntimeError(
                     "SenseVoice-Small requires FunASR. Run: pip install funasr modelscope torch"
                 ) from exc
 
             try:
+                self._progress = 40
                 model_source = resolve_modelscope_model(
                     self.cache_dir,
                     self.model_name,
                     revision="master",
                 )
                 vad_source = resolve_modelscope_alias(self.cache_dir, self.vad_model)
+                self._progress = 55
                 self._model = AutoModel(
                     model=model_source,
                     vad_model=vad_source,
                     disable_update=True,
                     device=self.device,
                 )
+                self._progress = 90
             except Exception as exc:
                 self._status = "error"
+                self._progress = 0
                 self._last_error = str(exc)
                 raise
 
             self._status = "ready"
+            self._progress = 100
             if status_callback:
                 status_callback("SenseVoice-Small 模型已就绪")
 

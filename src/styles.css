@@ -70,13 +70,68 @@ textarea {
   padding: 10px;
 }
 
+textarea[readonly] {
+  background: #f7f8f6;
+  color: #46504c;
+  cursor: default;
+}
+
 .boot {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 14px;
+  padding: 24px;
   color: #52605c;
+}
+
+.boot-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #c9d2cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #247a68;
+}
+
+.boot-copy {
+  width: min(340px, calc(100vw - 100px));
+  display: grid;
+  gap: 6px;
+}
+
+.boot-copy strong,
+.boot-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boot-copy strong {
+  color: #202629;
+  font-size: 14px;
+}
+
+.boot-copy span,
+.boot-copy small {
+  font-size: 12px;
+}
+
+.boot-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #dedfd9;
+}
+
+.boot-progress i {
+  display: block;
+  height: 100%;
+  background: #3a9f88;
+  transition: width 180ms ease;
 }
 
 .app-shell {
@@ -593,6 +648,25 @@ textarea {
   border: 1px solid #d9ddd8;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.history-item-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-item-head button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: #9c3d32;
+}
+
+.history-item-head button:hover:not(:disabled) {
+  border-color: #ca7c76;
+  background: #fff5f4;
 }
 
 .log-list p {

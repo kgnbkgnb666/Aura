@@ -10,6 +10,7 @@ import {
   Keyboard,
   Mic,
   Mic2,
+  Pencil,
   Play,
   Plus,
   RefreshCcw,
@@ -82,6 +83,10 @@ export default function App() {
   const [skillDrafts, setSkillDrafts] = useState<Skill[]>([]);
   const [skillScanDir, setSkillScanDir] = useState("");
   const [speechTestResult, setSpeechTestResult] = useState("");
+  const [bootProgress, setBootProgress] = useState(0);
+  const [bootStatus, setBootStatus] = useState("正在连接 Aura sidecar");
+  const [transcriptEditing, setTranscriptEditing] = useState(false);
+  const [compiledEditing, setCompiledEditing] = useState(false);
   const recordingRef = useRef(false);
   const transcriptEditedByUser = useRef(false);
 
@@ -112,7 +117,27 @@ export default function App() {
     async function boot() {
       try {
         await ensureSidecar();
-        const initial = await api.state();
+        if (cancelled) return;
+        setBootStatus("正在准备语音识别模型");
+        let initial = await api.state();
+        setBootProgress(initial.service.transcriber_progress);
+        setBootStatus(initial.runtime.status || "正在准备语音识别模型");
+        if (!initial.service.transcriber_ready) {
+          await api.warmupStt();
+          while (!cancelled) {
+            initial = await api.state();
+            setBootProgress(initial.service.transcriber_progress);
+            setBootStatus(initial.runtime.status || "正在加载语音识别模型");
+            if (initial.service.transcriber_ready) break;
+            if (initial.service.transcriber_status === "error") {
+              throw new Error(initial.service.transcriber_error || initial.runtime.status || "语音识别模型加载失败");
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 200));
+          }
+        }
+        if (cancelled) return;
+        setBootProgress(100);
+        setBootStatus("语音识别模型已就绪");
         const latestHistory = initial.history[0];
         const restored = latestHistory ? await api.loadSession(latestHistory.id) : null;
         const next = restored?.state || (await api.newSession(initial.current_mode?.id || initial.settings.mode_id)).state;
@@ -130,13 +155,6 @@ export default function App() {
         if (!cancelled) setDevices(devicePayload.devices);
         const logPayload = await api.logs().catch(() => ({ logs: [] }));
         if (!cancelled) setLogs(logPayload.logs);
-        if (!next.service.transcriber_ready) {
-          window.setTimeout(() => {
-            void api.warmupStt().then((payload) => {
-              if (!cancelled) setState(payload.state);
-            }).catch(() => undefined);
-          }, 700);
-        }
       } catch (exc) {
         if (!cancelled) setError(exc instanceof Error ? exc.message : String(exc));
       }
@@ -201,6 +219,8 @@ export default function App() {
       setCopied(false);
       setTranscript("");
       setCompiled("");
+      setTranscriptEditing(false);
+      setCompiledEditing(false);
       transcriptEditedByUser.current = false;
       recordingRef.current = true;
       const payload = await api.startRecording();
@@ -281,7 +301,13 @@ export default function App() {
 
   useEffect(() => {
     if (!copied) return;
-    const id = window.setTimeout(() => setCopied(false), 5000);
+    const id = window.setTimeout(() => {
+      setCopied(false);
+      setState((current) => {
+        if (!current || current.runtime.status !== "已复制") return current;
+        return { ...current, runtime: { ...current.runtime, status: "整理完成" } };
+      });
+    }, 1500);
     return () => window.clearTimeout(id);
   }, [copied]);
 
@@ -341,6 +367,8 @@ export default function App() {
     setCompiled(payload.compiled);
     setCopied(false);
     setActiveJobId("");
+    setTranscriptEditing(false);
+    setCompiledEditing(false);
   }
 
   async function shiftMode(delta: number) {
@@ -357,6 +385,8 @@ export default function App() {
     setTranscript("");
     setCompiled("");
     setCopied(false);
+    setTranscriptEditing(false);
+    setCompiledEditing(false);
   }
 
   async function copyCompiled() {
@@ -370,13 +400,30 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
+      await api.updateTurn(transcript, compiled);
       const payload = await api.compile(transcript);
       setCompiled(payload.compiled);
       setState(payload.state);
+      setTranscriptEditing(false);
+      setCompiledEditing(false);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function finishEditing(area: "transcript" | "compiled") {
+    if (area === "transcript") {
+      await recompile();
+      return;
+    }
+    try {
+      const payload = await api.updateTurn(transcript, compiled);
+      setState(payload.state);
+      setCompiledEditing(false);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
     }
   }
 
@@ -471,6 +518,20 @@ export default function App() {
     setState(payload.state);
   }
 
+  async function deleteHistory(sessionId: string) {
+    if (!window.confirm("删除这条历史记录？此操作无法撤销。")) return;
+    const payload = await api.deleteHistory(sessionId);
+    setState(payload.state);
+    if (payload.deleted_current) {
+      setTranscript("");
+      setCompiled("");
+      setCopied(false);
+      setActiveJobId("");
+      setTranscriptEditing(false);
+      setCompiledEditing(false);
+    }
+  }
+
   async function clearLogs() {
     const payload = await api.clearLogs();
     setLogs(payload.logs);
@@ -503,8 +564,22 @@ export default function App() {
   if (!state) {
     return (
       <main className="boot">
-        <Cpu size={22} />
-        <span>{error || "正在连接 Aura sidecar"}</span>
+        <div className="boot-mark"><Cpu size={24} /></div>
+        <div className="boot-copy">
+          <strong>{error ? "启动失败" : "正在启动 Aura"}</strong>
+          <span>{error || bootStatus}</span>
+          <div
+            className="boot-progress"
+            role="progressbar"
+            aria-label="STT 模型加载进度"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={bootProgress}
+          >
+            <i style={{ width: `${bootProgress}%` }} />
+          </div>
+          <small>{Math.round(bootProgress)}%</small>
+        </div>
       </main>
     );
   }
@@ -590,7 +665,7 @@ export default function App() {
             ) : null}
             {activeTab === "shortcuts" ? <ShortcutsPanel /> : null}
             {activeTab === "logs" ? <LogsPanel logs={logs} onRefresh={loadLogs} onClear={clearLogs} /> : null}
-            {activeTab === "history" ? <HistoryPanel state={state} onClear={clearHistory} /> : null}
+            {activeTab === "history" ? <HistoryPanel state={state} onClear={clearHistory} onDelete={deleteHistory} /> : null}
             </div>
           </div>
         </section>
@@ -645,34 +720,46 @@ export default function App() {
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 {state.runtime.recording ? <Mic size={16} /> : null}
                 <button
-                  title="重新编译"
-                  disabled={!transcript.trim() || busy}
-                  onClick={recompile}
+                  title={transcriptEditing ? "完成编辑" : "编辑原始转录"}
+                  disabled={busy || state.runtime.recording}
+                  onClick={() => transcriptEditing ? void finishEditing("transcript") : setTranscriptEditing(true)}
                 >
-                  <RefreshCcw size={14} />
-                  <span>重新编译</span>
+                  {transcriptEditing ? <Check size={14} /> : <Pencil size={14} />}
+                  <span>{transcriptEditing ? "完成" : "编辑"}</span>
                 </button>
               </div>
             </div>
             <textarea
               value={transcript}
+              readOnly={!transcriptEditing}
+              aria-label="原始转录"
               onChange={(e) => { setTranscript(e.target.value); transcriptEditedByUser.current = true; }}
-              onBlur={() => api.updateTurn(transcript, compiled).catch(() => {})}
               placeholder=" "
             />
           </div>
           <div className={`text-pane result-pane ${copied ? "copied" : ""}`}>
             <div className="pane-head">
               <span>AI 编译结果</span>
-              <button className={copied ? "copy-button copied" : "copy-button"} title={copied ? "已复制" : "复制"} onClick={copyCompiled}>
-                {copied ? <Check size={15} /> : <Clipboard size={15} />}
-                <span>{copied ? "已复制" : "复制"}</span>
-              </button>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button
+                  title={compiledEditing ? "完成编辑" : "编辑 AI 编译结果"}
+                  disabled={busy}
+                  onClick={() => compiledEditing ? void finishEditing("compiled") : setCompiledEditing(true)}
+                >
+                  {compiledEditing ? <Check size={14} /> : <Pencil size={14} />}
+                  <span>{compiledEditing ? "完成" : "编辑"}</span>
+                </button>
+                <button className={copied ? "copy-button copied" : "copy-button"} title={copied ? "已复制" : "复制"} onClick={copyCompiled}>
+                  {copied ? <Check size={15} /> : <Clipboard size={15} />}
+                  <span>{copied ? "已复制" : "复制"}</span>
+                </button>
+              </div>
             </div>
             <textarea
               value={compiled}
+              readOnly={!compiledEditing}
+              aria-label="AI 编译结果"
               onChange={(e) => setCompiled(e.target.value)}
-              onBlur={() => api.updateTurn(transcript, compiled).catch(() => {})}
               placeholder=" "
             />
           </div>
@@ -1199,7 +1286,15 @@ function LogsPanel({
   );
 }
 
-function HistoryPanel({ state, onClear }: { state: AppState; onClear: () => void }) {
+function HistoryPanel({
+  state,
+  onClear,
+  onDelete
+}: {
+  state: AppState;
+  onClear: () => void;
+  onDelete: (sessionId: string) => void;
+}) {
   return (
     <div className="settings-body history-list">
       <button onClick={onClear}>
@@ -1209,7 +1304,12 @@ function HistoryPanel({ state, onClear }: { state: AppState; onClear: () => void
       {state.history.length === 0 ? <p>暂无历史</p> : null}
       {state.history.map((item) => (
         <article key={item.id}>
-          <strong>{item.title}</strong>
+          <div className="history-item-head">
+            <strong>{item.title}</strong>
+            <button title="删除这条历史记录" onClick={() => onDelete(item.id)}>
+              <Trash2 size={14} />
+            </button>
+          </div>
           <span>{item.mode_id} · {item.turn_count} turns</span>
           <time>{shortTime(item.updated_at)}</time>
           <p>{compactText(item.last_transcript || item.last_compiled || "无内容", 90)}</p>

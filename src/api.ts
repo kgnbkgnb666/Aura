@@ -85,6 +85,9 @@ export type AppState = {
     llm_provider: string;
     transcriber: string;
     transcriber_ready: boolean;
+    transcriber_status: "not_loaded" | "loading" | "ready" | "error";
+    transcriber_progress: number;
+    transcriber_error: string;
   };
   runtime: RuntimeState;
 };
@@ -130,7 +133,7 @@ export async function ensureSidecar(): Promise<void> {
     baseUrl = "http://127.0.0.1:8765";
   }
   const health = await request<{ ok: boolean; app?: string; api_version?: number }>("/api/health");
-  if (!health.ok || health.app !== "Aura" || health.api_version !== 2) {
+  if (!health.ok || health.app !== "Aura" || health.api_version !== 3) {
     throw new Error("Aura sidecar protocol mismatch. Stop old sidecar processes and restart Aura.");
   }
 }
@@ -231,6 +234,11 @@ export const api = {
     }),
   clearHistory: () =>
     request<{ state: AppState }>("/api/history/clear", { method: "POST", body: "{}" }),
+  deleteHistory: (sessionId: string) =>
+    request<{ deleted: boolean; deleted_current: boolean; state: AppState }>("/api/history/delete", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId })
+    }),
   logs: () => request<{ logs: LogEntry[]; state: AppState }>("/api/logs"),
   clearLogs: () =>
     request<{ logs: LogEntry[]; state: AppState }>("/api/logs/clear", {

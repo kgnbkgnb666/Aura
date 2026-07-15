@@ -72,7 +72,7 @@ fn sidecar_is_compatible(port: u16) -> bool {
     if stream.read_to_string(&mut response).is_err() {
         return false;
     }
-    response.contains("\"app\": \"Aura\"") && response.contains("\"api_version\": 2")
+    response.contains("\"app\": \"Aura\"") && response.contains("\"api_version\": 3")
 }
 
 fn wait_for_sidecar(port: u16) -> bool {

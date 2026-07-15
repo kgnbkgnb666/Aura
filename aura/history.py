@@ -206,3 +206,9 @@ class HistoryStore:
         with self._connect() as conn:
             conn.execute("delete from turns")
             conn.execute("delete from sessions")
+
+    def delete_session(self, session_id: str) -> bool:
+        with self._connect() as conn:
+            conn.execute("delete from turns where session_id = ?", (session_id,))
+            result = conn.execute("delete from sessions where id = ?", (session_id,))
+            return result.rowcount > 0

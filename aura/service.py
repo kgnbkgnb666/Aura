@@ -121,12 +121,15 @@ class AuraService:
         return compiled
 
     def compile_only(self, transcript: str, on_chunk: TextCallback | None = None) -> str:
-        """Recompile transcript without creating a new turn — updates the latest turn in-place."""
+        """Recompile by updating the latest turn, creating only the initial turn when needed."""
+        previous_transcripts = self.sessions.previous_transcripts()
+        if self.current_session.turns:
+            previous_transcripts = previous_transcripts[:-1]
         request = CompileRequest(
             mode=self.current_mode,
             current_transcript=transcript,
             previous_compiled_text=self.sessions.previous_compiled_text(),
-            previous_transcripts=self.sessions.previous_transcripts(),
+            previous_transcripts=previous_transcripts,
             skills=self.settings.skills,
         )
         parts: list[str] = []
@@ -135,10 +138,17 @@ class AuraService:
             if on_chunk:
                 on_chunk(chunk)
         compiled = "".join(parts).strip()
-        self.current_session.update_latest_turn(
+        turn = self.current_session.update_latest_turn(
             raw_transcript=transcript,
             compiled_text=compiled,
         )
+        if turn is None:
+            self.current_session.add_turn(
+                raw_transcript=transcript,
+                compiled_text=compiled,
+                stt_provider=self.settings.stt_provider,
+                llm_provider=self.compiler.llm.name,
+            )
         if self.settings.save_history:
             self.history.save_session(self.current_session)
         return compiled
