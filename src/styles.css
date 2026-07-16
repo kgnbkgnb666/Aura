@@ -484,6 +484,13 @@ textarea[readonly] {
   background: #ffffff;
 }
 
+.skill-match-hint {
+  margin: 0;
+  color: #65706b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .skill-toolbar label {
   display: grid;
   gap: 5px;

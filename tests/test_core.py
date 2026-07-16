@@ -14,7 +14,9 @@ from aura.providers.stt.model_cache import (
 def test_modes_load():
     modes = ModeRegistry(Path("modes")).load()
     ids = {mode.id for mode in modes.all()}
-    assert ids
+    names = {mode.name for mode in modes.all()}
+    assert {"concise", "coding_agent", "professional"}.issubset(ids)
+    assert {"简洁模式", "标准模式", "专业模式"}.issubset(names)
     assert modes.get("missing-mode").id in ids
 
 
@@ -58,10 +60,33 @@ def test_compile_request_includes_enabled_skills():
         ],
     )
     messages = request.as_messages()
-    assert "可用 Skill 调用规则" in messages[0]["content"]
+    assert "可用 Skill 匹配规则" in messages[0]["content"]
     assert "patent-disclosure-writer" in messages[-1]["content"]
     assert "生成专利申请技术交底书" in messages[-1]["content"]
     assert "当用户描述创新点时调用该 Skill。" in messages[-1]["content"]
+
+
+def test_rule_based_compiler_references_matching_skill_only():
+    mode = ModeRegistry(Path("modes")).load().get("coding_agent")
+    skill = Skill(
+        id="patent",
+        name="patent-disclosure-writer",
+        description="生成中国专利申请技术交底书",
+        example="当用户提出专利、创新方案或技术交底书需求时使用。",
+        category="Writing",
+        enabled=True,
+    )
+    compiler = PromptCompiler(RuleBasedCompiler())
+
+    matched = compiler.compile(
+        CompileRequest(mode=mode, current_transcript="把这个创新方案整理成专利技术交底书", skills=[skill])
+    )
+    unmatched = compiler.compile(
+        CompileRequest(mode=mode, current_transcript="帮我写一封会议邀请邮件", skills=[skill])
+    )
+
+    assert "patent-disclosure-writer" in matched
+    assert "patent-disclosure-writer" not in unmatched
 
 
 def test_history_store_roundtrip(tmp_path):

@@ -154,10 +154,10 @@ class CompileRequest:
         if enabled_skills:
             system_prompt = (
                 f"{system_prompt.strip()}\n\n"
-                "可用 Skill 调用规则：根据用户当前需求和下列 Skill 的名称、描述、使用示例，"
-                "判断最终 prompt 是否需要明确调用某个 Skill。"
-                "如果需要，请在编译结果中自然写明应使用的 Skill 名称和必要上下文；"
-                "如果不需要，不要强行提及 Skill。"
+                "可用 Skill 匹配规则：先根据用户当前需求，逐项比较下列 Skill 的名称、描述和使用示例。"
+                "只有需求与某个 Skill 的用途或示例明确匹配时，才在最终 prompt 中自然写明该 Skill 的准确名称，"
+                "并补充调用它所需的任务目标、输入或上下文。"
+                "仅有宽泛或表面相似时视为不匹配；不匹配时不要提及任何 Skill，也不要输出匹配分析过程。"
             )
         user_parts = [
             "请把下面的语音转录整理成可直接发送给目标 agent 的 prompt。",

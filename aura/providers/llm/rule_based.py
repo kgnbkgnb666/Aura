@@ -20,6 +20,66 @@ RISK_WORDS = [
     "安装依赖",
 ]
 
+SKILL_STOP_WORDS = {
+    "skill",
+    "使用",
+    "用户",
+    "任务",
+    "需求",
+    "处理",
+    "生成",
+    "调用",
+    "用于",
+    "进行",
+    "相关",
+    "when",
+    "user",
+    "uses",
+    "use",
+    "with",
+    "from",
+    "this",
+}
+
+
+def _match_tokens(value: str) -> set[str]:
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]{2,}", value)
+        if token.lower() not in SKILL_STOP_WORDS
+    }
+    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", value):
+        for size in (2, 3, 4):
+            tokens.update(
+                chunk[index : index + size]
+                for index in range(max(0, len(chunk) - size + 1))
+                if chunk[index : index + size] not in SKILL_STOP_WORDS
+            )
+    return tokens
+
+
+def _matching_skills(user_text: str, transcript: str) -> list[str]:
+    marker = "当前可使用 Skill（名称、描述、使用示例）："
+    if marker not in user_text:
+        return []
+    section = user_text.split(marker, 1)[1].split("请参考 Skill 的使用示例", 1)[0]
+    transcript_lower = transcript.lower()
+    transcript_tokens = _match_tokens(transcript)
+    matches: list[str] = []
+    for block in re.split(r"\n\s*\n(?=\d+\. )", section.strip()):
+        first_line, _, details = block.partition("\n")
+        name = re.sub(r"^\d+\.\s*", "", first_line).strip()
+        if not name:
+            continue
+        name_tokens = [token for token in re.split(r"[-_\s]+", name.lower()) if len(token) >= 3]
+        exact_name_match = name.lower() in transcript_lower or any(
+            token in transcript_lower for token in name_tokens
+        )
+        shared_tokens = transcript_tokens & _match_tokens(details)
+        if exact_name_match or len(shared_tokens) >= 2 or any(len(token) >= 4 for token in shared_tokens):
+            matches.append(name)
+    return matches
+
 
 class RuleBasedCompiler:
     """Development fallback used when no LLM key is configured."""
@@ -41,6 +101,7 @@ class RuleBasedCompiler:
             )[0].strip()
 
         risky = any(word.lower() in transcript.lower() for word in RISK_WORDS)
+        matched_skills = _matching_skills(user_text, transcript)
         lines = [
             "请完成以下任务：",
             "",
@@ -49,6 +110,12 @@ class RuleBasedCompiler:
         ]
         if previous:
             lines.extend(["", "已有上下文：", previous])
+        if matched_skills:
+            lines.extend(["", "可用能力："])
+            lines.extend(
+                f"- 使用 Skill `{name}`，并将上述目标与原始需求作为调用上下文。"
+                for name in matched_skills
+            )
         lines.extend(
             [
                 "",
@@ -74,4 +141,3 @@ class RuleBasedCompiler:
                 ]
             )
         return "\n".join(lines)
-

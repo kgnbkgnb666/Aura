@@ -65,7 +65,7 @@ def test_sidecar_save_modes_sets_first_mode_as_default(tmp_path, monkeypatch):
             "modes": [
                 {
                     "id": "reviewer",
-                    "name": "Reviewer",
+                    "name": "审查模式",
                     "target": "code_review",
                     "description": "Review code",
                     "system_prompt": "Review the transcript as a code review request.",

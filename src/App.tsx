@@ -333,7 +333,8 @@ export default function App() {
         void shiftMode(1);
       }
       if (event.key === "Escape") {
-        void getCurrentWindow().hide().catch(() => undefined);
+        event.preventDefault();
+        void getCurrentWindow().close().catch(() => undefined);
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -1106,6 +1107,7 @@ function SkillSettings({
           <span>Skill 目录</span>
           <input value={skillScanDir} onChange={(event) => onSkillScanDir(event.target.value)} placeholder="例如 C:\\Users\\kg\\.codex\\skills" />
         </label>
+        <p className="skill-match-hint">AI 会结合 Skill 的名称、描述和使用示例自动判断；匹配时引用，未匹配时不会添加。</p>
         <div className="button-row">
           <button onClick={onScan}>
             <RefreshCcw size={15} />
@@ -1155,7 +1157,11 @@ function SkillSettings({
           </label>
           <label>
             <span>使用示例</span>
-            <textarea value={selectedSkill.example} onChange={(event) => updateSkill({ example: event.target.value })} />
+            <textarea
+              value={selectedSkill.example}
+              onChange={(event) => updateSkill({ example: event.target.value })}
+              placeholder="例如：当用户要求制作演示文稿时使用"
+            />
           </label>
           <div className="button-row">
             <button onClick={onSave}>
@@ -1234,7 +1240,7 @@ function ShortcutsPanel() {
     ["Space", "主界面聚焦时按住录音，松开后转录"],
     ["Ctrl+N", "新建会话"],
     ["Ctrl+Up / Ctrl+Down", "切换模式"],
-    ["Esc", "隐藏窗口"]
+    ["Esc", "退出 Aura"]
   ];
 
   return (

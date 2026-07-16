@@ -241,12 +241,12 @@ class AuraSidecar:
                 raise ValueError("Mode name and system prompt are required.")
             modes.append(
                 Mode(
-                    id=name,
+                    id=str(item.get("id") or name),
                     name=name,
-                    target=name,
+                    target=str(item.get("target") or name),
                     description=str(item.get("description") or "").strip(),
                     system_prompt=system_prompt,
-                    output_hint=name,
+                    output_hint=str(item.get("output_hint") or name),
                 )
             )
         with self._lock:
