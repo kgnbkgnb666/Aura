@@ -32,3 +32,9 @@ async function installGlobalShortcut() {
 }
 
 installGlobalShortcut();
+
+// Close → hide to tray; use tray menu "退出" to quit for real
+getCurrentWindow().onCloseRequested((event) => {
+  event.preventDefault();
+  void getCurrentWindow().hide();
+});

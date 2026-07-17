@@ -9,6 +9,12 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
+use tauri::{
+    image::Image,
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, WindowEvent,
+};
 
 const SIDECAR_PORTS: [u16; 4] = [8765, 8766, 8767, 8768];
 
@@ -176,11 +182,107 @@ fn ensure_sidecar(state: tauri::State<'_, SidecarState>) -> Result<SidecarInfo, 
     Err("No compatible Aura sidecar port is available. Stop old sidecar processes on 8765-8768 and retry.".to_string())
 }
 
+#[tauri::command]
+fn toggle_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().map_err(|e| e.to_string())? {
+            window.hide().map_err(|e| e.to_string())
+        } else {
+            window.show().map_err(|e| e.to_string())?;
+            window.set_focus().map_err(|e| e.to_string())
+        }
+    } else {
+        Ok(())
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .manage(SidecarState::default())
-        .invoke_handler(tauri::generate_handler![ensure_sidecar])
+        .invoke_handler(tauri::generate_handler![ensure_sidecar, toggle_window])
+        .setup(|app| {
+            let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))
+                .expect("Failed to load tray icon");
+
+            let toggle_item = MenuItemBuilder::with_id("toggle", "显示 / 隐藏")
+                .build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "退出 Aura")
+                .build(app)?;
+            let menu = MenuBuilder::new(app)
+                .item(&toggle_item)
+                .separator()
+                .item(&quit_item)
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(icon)
+                .menu(&menu)
+                .tooltip("Aura")
+                .on_menu_event(|app, event| {
+                    match event.id().as_ref() {
+                        "toggle" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = if window.is_visible().unwrap_or(false) {
+                                    window.hide()
+                                } else {
+                                    window.show().and_then(|_| window.set_focus())
+                                };
+                            }
+                        }
+                        "quit" => {
+                            // Kill sidecar before exit — app.exit(0) skips Drop, so we must clean up manually
+                            if let Some(state) = app.try_state::<SidecarState>() {
+                                if let Ok(mut child) = state.child.lock() {
+                                    if let Some(ref mut process) = *child {
+                                        let _ = process.kill();
+                                        let _ = process.wait();
+                                    }
+                                    *child = None;
+                                }
+                            }
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = if window.is_visible().unwrap_or(false) {
+                                window.hide()
+                            } else {
+                                window.show().and_then(|_| window.set_focus())
+                            };
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // When launched with --minimized (autostart), hide the window on startup
+            if std::env::args().any(|arg| arg == "--minimized") {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Aura");
 }

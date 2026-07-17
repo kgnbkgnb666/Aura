@@ -20,15 +20,16 @@ import {
   Terminal,
   Trash2
 } from "lucide-react";
-import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, ensureSidecar } from "./api";
+import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, autostart, ensureSidecar } from "./api";
 
-type Tab = "main" | "speech" | "llm" | "modes" | "skills" | "shortcuts" | "logs" | "history";
+type Tab = "main" | "general" | "speech" | "llm" | "modes" | "skills" | "shortcuts" | "logs" | "history";
 
 const emptySettings: Settings = {
   app_name: "Aura",
   mode_id: "coding_agent",
   auto_copy: true,
   save_history: true,
+  auto_launch: false,
   keep_window_on_top: false,
   hotkey: "<ctrl>+<shift>+<space>",
   push_to_talk_key: "space",
@@ -155,6 +156,18 @@ export default function App() {
         if (!cancelled) setDevices(devicePayload.devices);
         const logPayload = await api.logs().catch(() => ({ logs: [] }));
         if (!cancelled) setLogs(logPayload.logs);
+
+        // Sync autostart state: ensure OS setting matches user preference
+        try {
+          const osEnabled = await autostart.isEnabled();
+          if (osEnabled !== next.settings.auto_launch) {
+            if (next.settings.auto_launch) {
+              await autostart.enable();
+            } else {
+              await autostart.disable();
+            }
+          }
+        } catch { /* ignore on unsupported platforms */ }
       } catch (exc) {
         if (!cancelled) setError(exc instanceof Error ? exc.message : String(exc));
       }
@@ -334,7 +347,7 @@ export default function App() {
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        void getCurrentWindow().close().catch(() => undefined);
+        void getCurrentWindow().hide().catch(() => undefined);
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -426,11 +439,6 @@ export default function App() {
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     }
-  }
-
-  async function saveGeneral() {
-    const payload = await api.saveGeneral(draft);
-    setState(payload.state);
   }
 
   async function saveSpeech() {
@@ -549,7 +557,7 @@ export default function App() {
     return Math.max(0, Math.min(1, value / 1800));
   }, [state?.runtime.volume]);
 
-  function openSettings(tab: Tab = "speech") {
+  function openSettings(tab: Tab = "general") {
     if (state) {
       setModeDrafts(state.modes);
       setSkillDrafts(stateSkills(state));
@@ -601,6 +609,10 @@ export default function App() {
           </header>
           <div className="settings-content">
             <nav className="settings-tabs">
+              <button className={activeTab === "general" ? "active" : ""} onClick={() => setActiveTab("general")}>
+                <SettingsIcon size={15} />
+                <span>通用</span>
+              </button>
               <button className={activeTab === "speech" ? "active" : ""} onClick={() => setActiveTab("speech")}>
                 <Mic size={15} />
                 <span>语音</span>
@@ -631,6 +643,9 @@ export default function App() {
               </button>
             </nav>
             <div className="settings-page">
+            {activeTab === "general" ? (
+              <GeneralSettings draft={draft} onDraft={setDraft} onStateChange={setState} />
+            ) : null}
             {activeTab === "speech" ? (
               <SpeechSettings
                 draft={draft}
@@ -649,7 +664,7 @@ export default function App() {
               />
             ) : null}
             {activeTab === "llm" ? (
-              <LlmSettings draft={draft} onDraft={setDraft} onSaveGeneral={saveGeneral} onSaveLlm={saveLlm} />
+              <LlmSettings draft={draft} onDraft={setDraft} onSaveLlm={saveLlm} />
             ) : null}
             {activeTab === "modes" ? (
               <ModeSettings modes={modeDrafts} onModes={setModeDrafts} onSave={saveModes} />
@@ -708,7 +723,7 @@ export default function App() {
         <button title="新会话" onClick={newSession}>
           <RefreshCcw size={16} />
         </button>
-        <button title="设置" onClick={() => openSettings("speech")}>
+        <button title="设置" onClick={() => openSettings("general")}>
           <SettingsIcon size={16} />
         </button>
       </header>
@@ -1179,10 +1194,58 @@ function SkillSettings({
   );
 }
 
+function GeneralSettings(props: {
+  draft: Settings;
+  onDraft: (settings: Settings) => void;
+  onStateChange: (state: AppState) => void;
+}) {
+  const { draft, onDraft, onStateChange } = props;
+
+  async function setAutoCopy(checked: boolean) {
+    onDraft({ ...draft, auto_copy: checked });
+    const payload = await api.saveGeneral({ auto_copy: checked });
+    onStateChange(payload.state);
+  }
+
+  async function setAutoLaunch(checked: boolean) {
+    onDraft({ ...draft, auto_launch: checked });
+    try {
+      if (checked) await autostart.enable();
+      else await autostart.disable();
+    } catch { /* ignore */ }
+    const payload = await api.saveGeneral({ auto_launch: checked });
+    onStateChange(payload.state);
+  }
+
+  async function setSaveHistory(checked: boolean) {
+    onDraft({ ...draft, save_history: checked });
+    const payload = await api.saveGeneral({ save_history: checked });
+    onStateChange(payload.state);
+  }
+
+  return (
+    <div className="settings-body">
+      <div className="checks">
+        <label>
+          <input type="checkbox" checked={draft.auto_copy} onChange={(event) => setAutoCopy(event.target.checked)} />
+          <span>自动复制</span>
+        </label>
+        <label>
+          <input type="checkbox" checked={draft.auto_launch} onChange={(event) => setAutoLaunch(event.target.checked)} />
+          <span>开机自启动</span>
+        </label>
+        <label>
+          <input type="checkbox" checked={draft.save_history} onChange={(event) => setSaveHistory(event.target.checked)} />
+          <span>保存历史</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function LlmSettings(props: {
   draft: Settings;
   onDraft: (settings: Settings) => void;
-  onSaveGeneral: () => void;
   onSaveLlm: () => void;
 }) {
   const { draft, onDraft } = props;
@@ -1210,26 +1273,10 @@ function LlmSettings(props: {
           <input type="number" min="5" max="600" value={draft.llm_timeout_seconds} onChange={(event) => onDraft({ ...draft, llm_timeout_seconds: Number(event.target.value) })} />
         </label>
       </div>
-      <div className="checks">
-        <label>
-          <input type="checkbox" checked={draft.auto_copy} onChange={(event) => onDraft({ ...draft, auto_copy: event.target.checked })} />
-          <span>自动复制</span>
-        </label>
-        <label>
-          <input type="checkbox" checked={draft.save_history} onChange={(event) => onDraft({ ...draft, save_history: event.target.checked })} />
-          <span>保存历史</span>
-        </label>
-      </div>
-      <div className="button-row">
-        <button onClick={props.onSaveGeneral}>
-          <Check size={15} />
-          <span>保存行为</span>
-        </button>
-        <button onClick={props.onSaveLlm}>
-          <Check size={15} />
-          <span>保存 LLM</span>
-        </button>
-      </div>
+      <button onClick={props.onSaveLlm}>
+        <Check size={15} />
+        <span>保存 LLM</span>
+      </button>
     </div>
   );
 }

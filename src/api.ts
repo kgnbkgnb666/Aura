@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 
 export type Mode = {
   id: string;
@@ -26,9 +27,16 @@ export type Settings = {
   llm_model: string;
   llm_temperature: number;
   llm_timeout_seconds: number;
+  auto_launch: boolean;
   history_path: string | null;
   skills: Skill[];
   skill_scan_dir: string;
+};
+
+export const autostart = {
+  isEnabled: () => isEnabled(),
+  enable: () => enable(),
+  disable: () => disable(),
 };
 
 export type Skill = {

@@ -316,6 +316,7 @@ class AuraSidecar:
             settings.push_to_talk_key = str(payload.get("push_to_talk_key") or settings.push_to_talk_key)
             settings.auto_copy = bool(payload.get("auto_copy", settings.auto_copy))
             settings.save_history = bool(payload.get("save_history", settings.save_history))
+            settings.auto_launch = bool(payload.get("auto_launch", settings.auto_launch))
             self.settings_store.save(settings)
             self.latest_status = "设置已保存"
             self.logs.info("settings", "General settings saved")

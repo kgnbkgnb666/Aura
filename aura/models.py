@@ -54,6 +54,7 @@ class Settings:
     llm_model: str = "deepseek-chat"
     llm_temperature: float = 0.2
     llm_timeout_seconds: int = 60
+    auto_launch: bool = False
     history_path: Path | None = None
     skills: list[Skill] = field(default_factory=list)
     skill_scan_dir: str = ""
