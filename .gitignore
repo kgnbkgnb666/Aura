@@ -32,6 +32,8 @@ src-tauri/binaries/
 
 # Models and generated ML assets
 models/
+*.7z
+*.zip
 *.ckpt
 *.bin
 *.onnx

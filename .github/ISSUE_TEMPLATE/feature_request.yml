@@ -1,0 +1,21 @@
+name: 功能建议
+description: 建议新的场景、交互或扩展能力
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: 使用场景
+      description: 你在什么情况下遇到了什么问题？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 建议方案
+      description: 描述期望行为，也欢迎说明替代方案。
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 补充信息
+      description: 可附界面草图、同类产品或兼容性要求。

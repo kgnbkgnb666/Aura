@@ -1,0 +1,37 @@
+name: Bug 报告
+description: 报告可复现的问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么？你期望发生什么？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 复现步骤
+      placeholder: "1. 启动…\n2. 点击…\n3. 观察到…"
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Aura 版本或提交
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: 操作系统与版本
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 日志或截图
+      description: 请先移除 API Key、私人转写和其他敏感信息。
+  - type: checkboxes
+    attributes:
+      label: 自检
+      options:
+        - label: 我已搜索现有 Issue，且没有提交任何密钥或隐私数据。
+          required: true

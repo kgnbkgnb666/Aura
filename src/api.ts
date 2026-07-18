@@ -133,16 +133,19 @@ export type LogEntry = {
 };
 
 let baseUrl = "http://127.0.0.1:8765";
+let authToken = "";
 
 export async function ensureSidecar(): Promise<void> {
   try {
-    const info = await invoke<{ port: number; base_url: string }>("ensure_sidecar");
+    const info = await invoke<{ port: number; base_url: string; token: string }>("ensure_sidecar");
     baseUrl = info.base_url || `http://127.0.0.1:${info.port}`;
+    authToken = info.token;
   } catch {
     baseUrl = "http://127.0.0.1:8765";
+    authToken = "";
   }
   const health = await request<{ ok: boolean; app?: string; api_version?: number }>("/api/health");
-  if (!health.ok || health.app !== "Aura" || health.api_version !== 3) {
+  if (!health.ok || health.app !== "Aura" || health.api_version !== 4) {
     throw new Error("Aura sidecar protocol mismatch. Stop old sidecar processes and restart Aura.");
   }
 }
@@ -156,6 +159,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "X-Aura-Token": authToken,
       ...(init?.headers || {})
     }
   });

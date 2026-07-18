@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
     time::Duration,
@@ -22,6 +22,7 @@ const SIDECAR_PORTS: [u16; 4] = [8765, 8766, 8767, 8768];
 #[derive(Default)]
 struct SidecarState {
     child: Mutex<Option<Child>>,
+    connection: Mutex<Option<SidecarInfo>>,
 }
 
 impl Drop for SidecarState {
@@ -34,10 +35,11 @@ impl Drop for SidecarState {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct SidecarInfo {
     port: u16,
     base_url: String,
+    token: String,
 }
 
 #[derive(Deserialize)]
@@ -70,14 +72,15 @@ fn tcp_port_is_open(port: u16) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(120)).is_ok()
 }
 
-fn sidecar_health(port: u16) -> Option<SidecarHealth> {
+fn sidecar_health(port: u16, token: &str) -> Option<SidecarHealth> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(180)) else {
         return None;
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    let request =
-        format!("GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let request = format!(
+        "GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Aura-Token: {token}\r\nConnection: close\r\n\r\n"
+    );
     if stream.write_all(request.as_bytes()).is_err() {
         return None;
     }
@@ -89,25 +92,25 @@ fn sidecar_health(port: u16) -> Option<SidecarHealth> {
     serde_json::from_str(body).ok()
 }
 
-fn sidecar_is_compatible(port: u16) -> bool {
-    sidecar_health(port)
-        .map(|health| health.app == "Aura" && health.api_version == 3)
+fn sidecar_is_compatible(port: u16, token: &str) -> bool {
+    sidecar_health(port, token)
+        .map(|health| health.app == "Aura" && health.api_version == 4)
         .unwrap_or(false)
 }
 
-fn sidecar_belongs_to_current_process(port: u16) -> bool {
-    sidecar_health(port)
+fn sidecar_belongs_to_current_process(port: u16, token: &str) -> bool {
+    sidecar_health(port, token)
         .map(|health| {
             health.app == "Aura"
-                && health.api_version == 3
+                && health.api_version == 4
                 && health.parent_pid == Some(std::process::id())
         })
         .unwrap_or(false)
 }
 
-fn wait_for_sidecar(port: u16) -> bool {
+fn wait_for_sidecar(port: u16, token: &str) -> bool {
     for _ in 0..50 {
-        if sidecar_is_compatible(port) {
+        if sidecar_is_compatible(port, token) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -115,7 +118,12 @@ fn wait_for_sidecar(port: u16) -> bool {
     false
 }
 
-fn spawn_with(program: &str, prefix_args: &[&str], port: u16) -> std::io::Result<Child> {
+fn spawn_with(
+    program: &str,
+    prefix_args: &[&str],
+    port: u16,
+    token: &str,
+) -> std::io::Result<Child> {
     let root = project_root();
     let port_arg = port.to_string();
     let parent_pid_arg = std::process::id().to_string();
@@ -130,6 +138,7 @@ fn spawn_with(program: &str, prefix_args: &[&str], port: u16) -> std::io::Result
             .args(["--parent-pid", &parent_pid_arg])
             .current_dir(root)
             .env("PYTHONUTF8", "1")
+            .env("AURA_SIDECAR_TOKEN", token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -145,6 +154,7 @@ fn spawn_with(program: &str, prefix_args: &[&str], port: u16) -> std::io::Result
             .args(["--parent-pid", &parent_pid_arg])
             .current_dir(root)
             .env("PYTHONUTF8", "1")
+            .env("AURA_SIDECAR_TOKEN", token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -152,7 +162,12 @@ fn spawn_with(program: &str, prefix_args: &[&str], port: u16) -> std::io::Result
     }
 }
 
-fn spawn_bundled_sidecar(exe_path: &Path, port: u16) -> std::io::Result<Child> {
+#[cfg(not(debug_assertions))]
+fn spawn_bundled_sidecar(
+    exe_path: &std::path::Path,
+    port: u16,
+    token: &str,
+) -> std::io::Result<Child> {
     let port_arg = port.to_string();
     let parent_pid_arg = std::process::id().to_string();
     #[cfg(target_os = "windows")]
@@ -162,6 +177,7 @@ fn spawn_bundled_sidecar(exe_path: &Path, port: u16) -> std::io::Result<Child> {
             .args(["--host", "127.0.0.1", "--port"])
             .arg(port_arg)
             .args(["--parent-pid", &parent_pid_arg])
+            .env("AURA_SIDECAR_TOKEN", token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -174,6 +190,7 @@ fn spawn_bundled_sidecar(exe_path: &Path, port: u16) -> std::io::Result<Child> {
             .args(["--host", "127.0.0.1", "--port"])
             .arg(port_arg)
             .args(["--parent-pid", &parent_pid_arg])
+            .env("AURA_SIDECAR_TOKEN", token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -181,11 +198,11 @@ fn spawn_bundled_sidecar(exe_path: &Path, port: u16) -> std::io::Result<Child> {
     }
 }
 
-fn spawn_sidecar(port: u16) -> Result<Child, String> {
+fn spawn_sidecar(port: u16, token: &str) -> Result<Child, String> {
     // Priority 1: explicit AURA_PYTHON env var
     if let Ok(program) = std::env::var("AURA_PYTHON") {
         if !program.trim().is_empty() {
-            if let Ok(child) = spawn_with(&program, &[], port) {
+            if let Ok(child) = spawn_with(&program, &[], port, token) {
                 return Ok(child);
             }
         }
@@ -200,7 +217,7 @@ fn spawn_sidecar(port: u16) -> Result<Child, String> {
         if let Some(dir) = exe_dir {
             let bundled = dir.join("aura-sidecar.exe");
             if bundled.exists() {
-                return spawn_bundled_sidecar(&bundled, port)
+                return spawn_bundled_sidecar(&bundled, port, token)
                     .map_err(|e| format!("Failed to launch bundled sidecar: {e}"));
             }
         }
@@ -210,7 +227,7 @@ fn spawn_sidecar(port: u16) -> Result<Child, String> {
         let program = PathBuf::from(prefix).join("Scripts").join("python.exe");
         if program.exists() {
             let program = program.to_string_lossy().to_string();
-            if let Ok(child) = spawn_with(&program, &[], port) {
+            if let Ok(child) = spawn_with(&program, &[], port, token) {
                 return Ok(child);
             }
         }
@@ -220,30 +237,19 @@ fn spawn_sidecar(port: u16) -> Result<Child, String> {
         let program = PathBuf::from(prefix).join("python.exe");
         if program.exists() {
             let program = program.to_string_lossy().to_string();
-            if let Ok(child) = spawn_with(&program, &[], port) {
+            if let Ok(child) = spawn_with(&program, &[], port, token) {
                 return Ok(child);
             }
         }
     }
 
-    spawn_with("python", &[], port).or_else(|_| spawn_with("py", &["-3"], port)).map_err(|error| {
+    spawn_with("python", &[], port, token).or_else(|_| spawn_with("py", &["-3"], port, token)).map_err(|error| {
         format!("Unable to start Aura Python sidecar. Install Python or package a sidecar binary: {error}")
     })
 }
 
 #[tauri::command]
 fn ensure_sidecar(state: tauri::State<'_, SidecarState>) -> Result<SidecarInfo, String> {
-    // Only reuse a sidecar owned by this Aura process. An orphan left by an
-    // interrupted dev run must never be adopted by a later app instance.
-    for port in SIDECAR_PORTS {
-        if sidecar_belongs_to_current_process(port) {
-            return Ok(SidecarInfo {
-                port,
-                base_url: format!("http://127.0.0.1:{port}"),
-            });
-        }
-    }
-
     let mut child_slot = state
         .child
         .lock()
@@ -254,27 +260,54 @@ fn ensure_sidecar(state: tauri::State<'_, SidecarState>) -> Result<SidecarInfo, 
             .map_err(|error| error.to_string())?
             .is_none()
         {
-            for port in SIDECAR_PORTS {
-                if sidecar_belongs_to_current_process(port) {
-                    return Ok(SidecarInfo {
-                        port,
-                        base_url: format!("http://127.0.0.1:{port}"),
-                    });
+            let connection = state
+                .connection
+                .lock()
+                .map_err(|_| "Sidecar connection lock poisoned".to_string())?;
+            if let Some(info) = connection.as_ref() {
+                if sidecar_belongs_to_current_process(info.port, &info.token) {
+                    return Ok(info.clone());
                 }
             }
         }
     }
 
+    if let Some(mut process) = child_slot.take() {
+        let _ = process.kill();
+        let _ = process.wait();
+    }
+    *state
+        .connection
+        .lock()
+        .map_err(|_| "Sidecar connection lock poisoned".to_string())? = None;
+
     for port in SIDECAR_PORTS {
         if tcp_port_is_open(port) {
             continue;
         }
-        *child_slot = Some(spawn_sidecar(port)?);
-        if wait_for_sidecar(port) {
-            return Ok(SidecarInfo {
+        let mut token_bytes = [0_u8; 32];
+        getrandom::fill(&mut token_bytes)
+            .map_err(|error| format!("Unable to generate sidecar token: {error}"))?;
+        let token: String = token_bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        *child_slot = Some(spawn_sidecar(port, &token)?);
+        if wait_for_sidecar(port, &token) {
+            let info = SidecarInfo {
                 port,
                 base_url: format!("http://127.0.0.1:{port}"),
-            });
+                token,
+            };
+            *state
+                .connection
+                .lock()
+                .map_err(|_| "Sidecar connection lock poisoned".to_string())? = Some(info.clone());
+            return Ok(info);
+        }
+        if let Some(mut process) = child_slot.take() {
+            let _ = process.kill();
+            let _ = process.wait();
         }
     }
 

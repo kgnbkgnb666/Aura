@@ -1,9 +1,22 @@
+import json
 import os
+import threading
+from http.server import ThreadingHTTPServer
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from aura.config import SettingsStore
 from aura.models import RecordingResult
 from aura.providers.llm import OpenAICompatibleClient
-from aura.sidecar import API_KEY_MASK, AuraSidecar, _process_is_alive, json_response, settings_payload
+from aura.sidecar import (
+    API_KEY_MASK,
+    MAX_REQUEST_BODY_BYTES,
+    AuraSidecar,
+    _process_is_alive,
+    build_handler,
+    json_response,
+    settings_payload,
+)
 
 
 def local_app(tmp_path):
@@ -101,6 +114,63 @@ def test_sidecar_save_modes_preserves_current_mode(tmp_path):
     assert state["settings"]["mode_id"] == "reviewer"
     assert state["current_session"]["mode_id"] == "reviewer"
     assert (tmp_path / "modes" / "001-reviewer.yaml").exists()
+
+
+def test_sidecar_rejects_empty_mode_list(tmp_path):
+    app = local_app(tmp_path)
+
+    try:
+        app.save_modes({"modes": []})
+    except ValueError as exc:
+        assert "At least one" in str(exc)
+    else:
+        raise AssertionError("empty mode list should be rejected")
+
+
+def test_http_api_requires_token_and_limits_request_body(tmp_path):
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        build_handler(local_app(tmp_path), auth_token="test-token"),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        try:
+            urlopen(f"{base_url}/api/health", timeout=2)
+        except HTTPError as exc:
+            assert exc.code == 401
+        else:
+            raise AssertionError("unauthenticated request should be rejected")
+
+        request = Request(
+            f"{base_url}/api/health",
+            headers={"X-Aura-Token": "test-token", "Origin": "https://evil.example"},
+        )
+        with urlopen(request, timeout=2) as response:
+            assert json.load(response)["api_version"] == 4
+            assert response.headers.get("Access-Control-Allow-Origin") is None
+
+        oversized = Request(
+            f"{base_url}/api/compile",
+            method="POST",
+            headers={
+                "X-Aura-Token": "test-token",
+                "Content-Type": "application/json",
+                "Content-Length": str(MAX_REQUEST_BODY_BYTES + 1),
+            },
+            data=b"{}",
+        )
+        try:
+            urlopen(oversized, timeout=2)
+        except HTTPError as exc:
+            assert exc.code == 413
+        else:
+            raise AssertionError("oversized request should be rejected")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_sidecar_load_session_restores_turn_context(tmp_path):

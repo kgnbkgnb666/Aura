@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import logging
 import os
+import secrets
 import sys
 import threading
 import time
@@ -24,6 +26,18 @@ from .runtime import ProcessingJobStore, RuntimeLog
 from .service import AuraService
 
 API_KEY_MASK = "********"
+MAX_REQUEST_BODY_BYTES = 1024 * 1024
+ALLOWED_WEBVIEW_ORIGINS = {
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "tauri://localhost",
+}
+
+
+class RequestBodyTooLarge(ValueError):
+    pass
 
 
 def _log_dir() -> Path:
@@ -305,6 +319,8 @@ class AuraSidecar:
                     output_hint=str(item.get("output_hint") or name),
                 )
             )
+        if not modes:
+            raise ValueError("At least one valid mode is required.")
         with self._lock:
             self.service.modes.save_all(modes)
             available_ids = {mode.id for mode in modes}
@@ -606,7 +622,11 @@ class AuraSidecar:
         return {"logs": self.logs.recent(), "state": self.state()}
 
 
-def build_handler(app: AuraSidecar, parent_pid: int | None = None) -> type[BaseHTTPRequestHandler]:
+def build_handler(
+    app: AuraSidecar,
+    parent_pid: int | None = None,
+    auth_token: str = "",
+) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "AuraSidecar/1.0"
 
@@ -615,30 +635,50 @@ def build_handler(app: AuraSidecar, parent_pid: int | None = None) -> type[BaseH
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
+            origin = self.headers.get("Origin", "")
+            if origin in ALLOWED_WEBVIEW_ORIGINS:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Aura-Token")
             self.end_headers()
             self.wfile.write(body)
 
         def _payload(self) -> JsonDict:
             length = int(self.headers.get("Content-Length", "0") or "0")
+            if length < 0 or length > MAX_REQUEST_BODY_BYTES:
+                raise RequestBodyTooLarge("Request body is too large.")
             if length == 0:
                 return {}
             raw = self.rfile.read(length).decode("utf-8")
-            return json.loads(raw) if raw else {}
+            payload = json.loads(raw) if raw else {}
+            if not isinstance(payload, dict):
+                raise ValueError("JSON request body must be an object.")
+            return payload
+
+        def _authorized(self) -> bool:
+            supplied = self.headers.get("X-Aura-Token", "")
+            return bool(auth_token) and hmac.compare_digest(supplied, auth_token)
+
+        def _require_authorization(self) -> bool:
+            if self._authorized():
+                return True
+            self._send({"error": "Unauthorized"}, status=401)
+            return False
 
         def do_OPTIONS(self) -> None:
             self._send({})
 
         def do_GET(self) -> None:
+            if not self._require_authorization():
+                return
             path = urlparse(self.path).path
             try:
                 if path == "/api/health":
                     self._send({
                         "ok": True,
                         "app": "Aura",
-                        "api_version": 3,
+                        "api_version": 4,
                         "parent_pid": parent_pid,
                     })
                 elif path == "/api/state":
@@ -655,9 +695,12 @@ def build_handler(app: AuraSidecar, parent_pid: int | None = None) -> type[BaseH
                     self._send({"error": f"Unknown endpoint: {path}"}, status=404)
             except Exception as exc:
                 app.logs.error("http", str(exc), self.path)
-                self._send({"error": str(exc)}, status=500)
+                status = 400 if isinstance(exc, (ValueError, json.JSONDecodeError)) else 500
+                self._send({"error": str(exc)}, status=status)
 
         def do_POST(self) -> None:
+            if not self._require_authorization():
+                return
             path = urlparse(self.path).path
             try:
                 payload = self._payload()
@@ -691,7 +734,13 @@ def build_handler(app: AuraSidecar, parent_pid: int | None = None) -> type[BaseH
             except Exception as exc:
                 app.logs.error("http", str(exc), self.path)
                 app.set_status(str(exc), level="error", source="http")
-                self._send({"error": str(exc)}, status=500)
+                if isinstance(exc, RequestBodyTooLarge):
+                    status = 413
+                elif isinstance(exc, (ValueError, json.JSONDecodeError)):
+                    status = 400
+                else:
+                    status = 500
+                self._send({"error": str(exc)}, status=status)
 
         def log_message(self, format: str, *args: Any) -> None:
             return
@@ -720,7 +769,12 @@ def _process_is_alive(pid: int) -> bool:
         return False
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, parent_pid: int | None = None) -> None:
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    parent_pid: int | None = None,
+    auth_token: str | None = None,
+) -> None:
     file_log = _setup_logging()
     file_log.info("Aura sidecar starting... (host=%s port=%s)", host, port)
 
@@ -730,7 +784,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765, parent_pid: int | None = No
         file_log.critical("Failed to initialize AuraSidecar: %s", traceback.format_exc())
         raise
 
-    server = ThreadingHTTPServer((host, port), build_handler(app, parent_pid=parent_pid))
+    token = auth_token or os.environ.get("AURA_SIDECAR_TOKEN") or secrets.token_urlsafe(32)
+    server = ThreadingHTTPServer(
+        (host, port),
+        build_handler(app, parent_pid=parent_pid, auth_token=token),
+    )
 
     # Hook RuntimeLog to also write to file
     _original_add = app.logs.add
@@ -742,7 +800,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, parent_pid: int | None = No
 
     print(
         json.dumps(
-            {"status": "listening", "host": host, "port": server.server_port},
+            {"status": "listening", "host": host, "port": server.server_port, "token": token},
             ensure_ascii=False,
         ),
         flush=True,
