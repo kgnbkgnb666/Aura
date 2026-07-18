@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from .compiler import PromptCompiler
-from .config import SettingsStore
+from .config import SettingsStore, is_deepseek_endpoint
 from .models import CompileRequest
 from .modes import ModeRegistry
 from .providers.llm import OpenAICompatibleClient, RuleBasedCompiler
@@ -14,13 +14,25 @@ from .service import AuraService
 
 def build_compiler():
     settings = SettingsStore().load()
-    if settings.llm_api_key:
+    is_deepseek = settings.llm_provider == "deepseek" or is_deepseek_endpoint(
+        settings.llm_base_url
+    )
+    is_custom = not is_deepseek
+    if settings.llm_api_key or (
+        is_custom and settings.llm_base_url and settings.llm_model
+    ):
         llm = OpenAICompatibleClient(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
             model=settings.llm_model,
             temperature=settings.llm_temperature,
             timeout_seconds=settings.llm_timeout_seconds,
+            allow_anonymous=is_custom and not settings.llm_api_key,
+            thinking_enabled=(
+                settings.llm_thinking_enabled
+                if is_deepseek
+                else None
+            ),
         )
     else:
         llm = RuleBasedCompiler()

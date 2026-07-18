@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowLeft,
   Check,
@@ -20,13 +19,14 @@ import {
   Terminal,
   Trash2
 } from "lucide-react";
-import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, autostart, ensureSidecar } from "./api";
+import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, autostart, ensureSidecar, hideMainWindow } from "./api";
+import deepseekLogo from "./assets/deepseek-logo.svg";
 
 type Tab = "main" | "general" | "speech" | "llm" | "modes" | "skills" | "shortcuts" | "logs" | "history";
 
 const emptySettings: Settings = {
   app_name: "Aura",
-  mode_id: "coding_agent",
+  mode_id: "professional",
   auto_copy: true,
   save_history: true,
   auto_launch: false,
@@ -36,10 +36,11 @@ const emptySettings: Settings = {
   input_device_index: null,
   stt_provider: "sensevoice-small",
   model_cache_dir: "",
-  llm_provider: "openai_compatible",
-  llm_base_url: "",
+  llm_provider: "deepseek",
+  llm_base_url: "https://api.deepseek.com",
   llm_api_key: "",
-  llm_model: "",
+  llm_model: "deepseek-v4-flash",
+  llm_thinking_enabled: false,
   llm_temperature: 0.2,
   llm_timeout_seconds: 60,
   history_path: null,
@@ -66,6 +67,14 @@ function stateSkills(state: AppState) {
   return state.skills || state.settings.skills || [];
 }
 
+const deepseekModels = ["deepseek-v4-flash", "deepseek-v4-pro"];
+const apiKeyMask = "********";
+
+function isDeepSeekEndpoint(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/\/+$/, "");
+  return normalized === "https://api.deepseek.com" || normalized === "https://api.deepseek.com/v1";
+}
+
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -76,6 +85,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Settings>(emptySettings);
+  const [deepseekApiKeyDraft, setDeepseekApiKeyDraft] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [micTestCountdown, setMicTestCountdown] = useState(0);
@@ -86,13 +96,34 @@ export default function App() {
   const [speechTestResult, setSpeechTestResult] = useState("");
   const [bootProgress, setBootProgress] = useState(0);
   const [bootStatus, setBootStatus] = useState("正在连接 Aura sidecar");
+  const [bootStage, setBootStage] = useState("connecting");
+  const [bootElapsedSeconds, setBootElapsedSeconds] = useState(0);
   const [transcriptEditing, setTranscriptEditing] = useState(false);
   const [compiledEditing, setCompiledEditing] = useState(false);
   const recordingRef = useRef(false);
   const transcriptEditedByUser = useRef(false);
+  const historySelectRef = useRef<HTMLSelectElement>(null);
 
   const status = error || state?.runtime.status || "启动中";
   const selectedMode = state?.current_mode;
+
+  useEffect(() => {
+    if (state || error) return;
+    const startedAt = Date.now();
+    const updateElapsed = () => {
+      setBootElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    };
+    updateElapsed();
+    const id = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(id);
+  }, [error, state]);
+
+  useEffect(() => {
+    const draftIsDeepSeek = draft.llm_provider === "deepseek" || isDeepSeekEndpoint(draft.llm_base_url);
+    if (draftIsDeepSeek && draft.llm_api_key !== deepseekApiKeyDraft) {
+      setDeepseekApiKeyDraft(draft.llm_api_key);
+    }
+  }, [deepseekApiKeyDraft, draft.llm_api_key, draft.llm_base_url, draft.llm_provider]);
 
   const refresh = useCallback(async () => {
     const next = await api.state();
@@ -120,14 +151,21 @@ export default function App() {
         await ensureSidecar();
         if (cancelled) return;
         setBootStatus("正在准备语音识别模型");
+        setBootStage("checking");
         let initial = await api.state();
         setBootProgress(initial.service.transcriber_progress);
-        setBootStatus(initial.runtime.status || "正在准备语音识别模型");
+        setBootStage(initial.service.transcriber_status);
+        setBootStatus(
+          initial.service.transcriber_ready
+            ? "语音识别模型已就绪"
+            : "正在检查本地语音模型"
+        );
         if (!initial.service.transcriber_ready) {
           await api.warmupStt();
           while (!cancelled) {
             initial = await api.state();
             setBootProgress(initial.service.transcriber_progress);
+            setBootStage(initial.service.transcriber_status);
             setBootStatus(initial.runtime.status || "正在加载语音识别模型");
             if (initial.service.transcriber_ready) break;
             if (initial.service.transcriber_status === "error") {
@@ -138,6 +176,7 @@ export default function App() {
         }
         if (cancelled) return;
         setBootProgress(100);
+        setBootStage("ready");
         setBootStatus("语音识别模型已就绪");
         const latestHistory = initial.history[0];
         const restored = latestHistory ? await api.loadSession(latestHistory.id) : null;
@@ -226,7 +265,20 @@ export default function App() {
   }, [micTestActive]);
 
   const startRecording = useCallback(async () => {
-    if (recordingRef.current || busy) return;
+    historySelectRef.current?.blur();
+    if (recordingRef.current) return;
+    if (!state) {
+      setBootStatus("语音模型仍在加载，完成后即可按住空格录音");
+      return;
+    }
+    if (!state.service.transcriber_ready) {
+      setError("语音识别模型尚未就绪，请稍候再录音。");
+      return;
+    }
+    if (busy) {
+      setError("上一段录音仍在处理中，请完成后再录音。");
+      return;
+    }
     try {
       setError("");
       setCopied(false);
@@ -242,7 +294,7 @@ export default function App() {
       recordingRef.current = false;
       setError(exc instanceof Error ? exc.message : String(exc));
     }
-  }, [busy]);
+  }, [busy, state]);
 
   const stopRecording = useCallback(async () => {
     if (!recordingRef.current) return;
@@ -324,39 +376,59 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [copied]);
 
+  const keyboardContextRef = useRef({
+    activeTab,
+    startRecording,
+    stopRecording,
+    newSession,
+    shiftMode
+  });
+  keyboardContextRef.current = {
+    activeTab,
+    startRecording,
+    stopRecording,
+    newSession,
+    shiftMode
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const context = keyboardContextRef.current;
       const editing = ["textarea", "input"].includes(
         (document.activeElement?.tagName || "").toLowerCase()
       );
-      if (event.code === "Space" && !event.repeat && activeTab === "main" && !editing) {
+      if (event.code === "Space" && !event.repeat && context.activeTab === "main" && !editing) {
         event.preventDefault();
-        startRecording();
+        void context.startRecording();
       }
       if (event.ctrlKey && event.key.toLowerCase() === "n") {
         event.preventDefault();
-        void newSession();
+        void context.newSession();
       }
       if (event.ctrlKey && event.key === "ArrowUp") {
         event.preventDefault();
-        void shiftMode(-1);
+        void context.shiftMode(-1);
       }
       if (event.ctrlKey && event.key === "ArrowDown") {
         event.preventDefault();
-        void shiftMode(1);
+        void context.shiftMode(1);
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        void getCurrentWindow().hide().catch(() => undefined);
+        event.stopPropagation();
+        void hideMainWindow().catch((exc) => {
+          setError(exc instanceof Error ? exc.message : String(exc));
+        });
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
+      const context = keyboardContextRef.current;
       const editing = ["textarea", "input"].includes(
         (document.activeElement?.tagName || "").toLowerCase()
       );
-      if (event.code === "Space" && activeTab === "main" && !editing) {
+      if (event.code === "Space" && context.activeTab === "main" && !editing) {
         event.preventDefault();
-        stopRecording();
+        void context.stopRecording();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -365,7 +437,7 @@ export default function App() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [activeTab, startRecording, stopRecording, state]);
+  }, []);
 
   async function setMode(modeId: string) {
     const payload = await api.setMode(modeId);
@@ -373,6 +445,7 @@ export default function App() {
   }
 
   async function loadHistorySession(sessionId: string) {
+    historySelectRef.current?.blur();
     if (!sessionId || sessionId === state?.current_session.id) return;
     const payload = await api.loadSession(sessionId);
     setState(payload.state);
@@ -449,6 +522,7 @@ export default function App() {
   async function saveLlm() {
     const payload = await api.saveLlm(draft);
     setState(payload.state);
+    setDraft(payload.state.settings);
   }
 
   async function saveModes() {
@@ -578,16 +652,22 @@ export default function App() {
           <strong>{error ? "启动失败" : "正在启动 Aura"}</strong>
           <span>{error || bootStatus}</span>
           <div
-            className="boot-progress"
+            className={`boot-progress ${!error && bootProgress < 100 ? "active" : ""}`}
             role="progressbar"
             aria-label="STT 模型加载进度"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={bootProgress}
           >
-            <i style={{ width: `${bootProgress}%` }} />
+            <i style={{ width: `${error ? bootProgress : Math.max(bootProgress, 5)}%` }} />
           </div>
-          <small>{Math.round(bootProgress)}%</small>
+          <small>
+            {error
+              ? "启动未完成，请根据上方信息检查配置"
+              : bootStage === "downloading"
+                ? `模型正在下载 · 已等待 ${bootElapsedSeconds} 秒 · 下载速度取决于网络`
+                : `${Math.round(bootProgress)}% · 已等待 ${bootElapsedSeconds} 秒 · 后台仍在工作`}
+          </small>
         </div>
       </main>
     );
@@ -664,7 +744,13 @@ export default function App() {
               />
             ) : null}
             {activeTab === "llm" ? (
-              <LlmSettings draft={draft} onDraft={setDraft} onSaveLlm={saveLlm} />
+              <LlmSettings
+                draft={draft}
+                deepseekApiKey={deepseekApiKeyDraft}
+                onDeepseekApiKeyChange={setDeepseekApiKeyDraft}
+                onDraft={setDraft}
+                onSaveLlm={saveLlm}
+              />
             ) : null}
             {activeTab === "modes" ? (
               <ModeSettings modes={modeDrafts} onModes={setModeDrafts} onSave={saveModes} />
@@ -706,7 +792,24 @@ export default function App() {
             </option>
           ))}
         </select>
-        <select value={state.current_session.id} onChange={(event) => void loadHistorySession(event.target.value)}>
+        <select
+          key={state.current_session.id}
+          ref={historySelectRef}
+          aria-label="历史会话"
+          value={state.current_session.id}
+          disabled={state.runtime.recording || busy}
+          onChange={(event) => {
+            const sessionId = event.currentTarget.value;
+            event.currentTarget.blur();
+            void loadHistorySession(sessionId);
+          }}
+          onKeyDown={(event) => {
+            if (event.code === "Space") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
+        >
           <option value={state.current_session.id}>历史会话</option>
           {state.history.filter((item) => item.id !== state.current_session.id).map((item) => (
             <option key={item.id} value={item.id}>
@@ -784,9 +887,9 @@ export default function App() {
       </section>
 
       <footer>
-        <button className={`record-button ${state.runtime.recording ? "active" : ""}`} onMouseDown={startRecording} onMouseUp={stopRecording} disabled={busy}>
+        <button className={`record-button ${state.runtime.recording ? "active" : ""}`} onMouseDown={startRecording} onMouseUp={stopRecording} disabled={busy || !state.service.transcriber_ready}>
           {state.runtime.recording ? <Square size={17} /> : <Play size={17} />}
-          <span>{busy ? "处理中" : state.runtime.recording ? "松开完成" : "按住录音"}</span>
+          <span>{!state.service.transcriber_ready ? "模型准备中" : busy ? "处理中" : state.runtime.recording ? "松开完成" : "按住录音"}</span>
         </button>
         <span>{copied ? "已自动复制" : `${state.current_session.turn_count} turns`}</span>
       </footer>
@@ -1245,24 +1348,129 @@ function GeneralSettings(props: {
 
 function LlmSettings(props: {
   draft: Settings;
+  deepseekApiKey: string;
+  onDeepseekApiKeyChange: (value: string) => void;
   onDraft: (settings: Settings) => void;
   onSaveLlm: () => void;
 }) {
-  const { draft, onDraft } = props;
+  const { draft, deepseekApiKey, onDeepseekApiKeyChange, onDraft } = props;
+  const isDeepSeek = draft.llm_provider === "deepseek" || isDeepSeekEndpoint(draft.llm_base_url);
+  const isCustom = !isDeepSeek;
+  const deepseekApiKeyCache = useRef(deepseekApiKey);
+  const deepseekModel = deepseekModels.includes(draft.llm_model)
+    ? draft.llm_model
+    : "deepseek-v4-flash";
+
+  useEffect(() => {
+    if (!isCustom) {
+      deepseekApiKeyCache.current = draft.llm_api_key;
+    }
+  }, [draft.llm_api_key, isCustom]);
+
+  useEffect(() => {
+    if (deepseekApiKey !== "") {
+      deepseekApiKeyCache.current = deepseekApiKey;
+    }
+  }, [deepseekApiKey]);
+
+  function useDeepSeek() {
+    const keepKey = isDeepSeekEndpoint(draft.llm_base_url);
+    const cachedKey = deepseekApiKeyCache.current;
+    onDraft({
+      ...draft,
+      llm_provider: "deepseek",
+      llm_base_url: "https://api.deepseek.com",
+      llm_model: "deepseek-v4-flash",
+      llm_api_key: keepKey ? draft.llm_api_key : cachedKey,
+      llm_thinking_enabled: false
+    });
+  }
+
+  function useCustom() {
+    if (isCustom) return;
+    deepseekApiKeyCache.current = draft.llm_api_key;
+    onDeepseekApiKeyChange(draft.llm_api_key);
+    onDraft({
+      ...draft,
+      llm_provider: "openai_compatible",
+      llm_base_url: "",
+      llm_model: "",
+      llm_api_key: "",
+      llm_thinking_enabled: false
+    });
+  }
+
   return (
-    <div className="settings-body">
+    <div className="settings-body llm-settings">
+      <div className="llm-source-switch" role="group" aria-label="大模型来源">
+        <button className={!isCustom ? "active" : ""} onClick={useDeepSeek}>
+          <img src={deepseekLogo} alt="DeepSeek" />
+          <span><strong>DeepSeek</strong><small>默认</small></span>
+        </button>
+        <button className={isCustom ? "active" : ""} onClick={useCustom}>
+          <SlidersHorizontal size={20} />
+          <span><strong>自定义接口</strong><small>OpenAI Compatible</small></span>
+        </button>
+      </div>
+
       <label>
-        <span>Base URL</span>
-        <input value={draft.llm_base_url} onChange={(event) => onDraft({ ...draft, llm_base_url: event.target.value })} />
+        <span>API 端点</span>
+        <input
+          value={draft.llm_base_url}
+          onChange={(event) => onDraft({ ...draft, llm_base_url: event.target.value })}
+          placeholder={isCustom ? "例如 http://127.0.0.1:11434/v1" : "https://api.deepseek.com"}
+        />
       </label>
       <label>
-        <span>Model</span>
-        <input value={draft.llm_model} onChange={(event) => onDraft({ ...draft, llm_model: event.target.value })} />
+        <span>模型名称</span>
+        {!isCustom ? (
+          <select
+            value={deepseekModel}
+            onChange={(event) => onDraft({
+              ...draft,
+              llm_provider: "deepseek",
+              llm_model: event.target.value
+            })}
+          >
+            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          </select>
+        ) : (
+          <input
+            value={draft.llm_model}
+            onChange={(event) => onDraft({ ...draft, llm_model: event.target.value })}
+            placeholder="服务提供的模型 ID"
+          />
+        )}
       </label>
       <label>
-        <span>API Key</span>
-        <input type="password" value={draft.llm_api_key} onChange={(event) => onDraft({ ...draft, llm_api_key: event.target.value })} />
+        <span>{isCustom ? "API Key（可选）" : "DeepSeek API Key"}</span>
+        <input
+          type="password"
+          value={draft.llm_api_key}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (!isCustom) onDeepseekApiKeyChange(value);
+            onDraft({ ...draft, llm_api_key: value });
+          }}
+          onFocus={(event) => {
+            if (draft.llm_api_key === apiKeyMask) event.currentTarget.select();
+          }}
+          placeholder={isCustom ? "无鉴权的本地服务可留空" : "仅保存在本地 config.local.json"}
+        />
       </label>
+      {!isCustom ? (
+        <label className="thinking-toggle">
+          <input
+            type="checkbox"
+            checked={draft.llm_thinking_enabled}
+            onChange={(event) => onDraft({ ...draft, llm_thinking_enabled: event.target.checked })}
+          />
+          <span><strong>思考模式</strong><small>默认关闭；开启后会提高复杂任务质量，但响应更慢。</small></span>
+        </label>
+      ) : (
+        <p className="setting-hint">支持 OpenAI-compatible 接口，包括用户自建服务、Ollama、vLLM 或第三方网关。</p>
+      )}
       <div className="split-fields">
         <label>
           <span>Temperature</span>
@@ -1284,10 +1492,10 @@ function LlmSettings(props: {
 function ShortcutsPanel() {
   const shortcuts = [
     ["Ctrl+Shift+Space", "打开或隐藏 Aura"],
-    ["Space", "主界面聚焦时按住录音，松开后转录"],
+    ["Space", "模型就绪且主界面聚焦时按住录音，松开后转录"],
     ["Ctrl+N", "新建会话"],
     ["Ctrl+Up / Ctrl+Down", "切换模式"],
-    ["Esc", "退出 Aura"]
+    ["Esc", "隐藏 Aura"]
   ];
 
   return (

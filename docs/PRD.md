@@ -54,12 +54,25 @@ The app is designed for Codex, Claude Code, Cursor, ChatGPT, and other agentic t
 ## Local Storage
 
 ```text
-%APPDATA%/Aura/config.json
-%APPDATA%/Aura/history.sqlite
+config.local.json
+.aura-local/history.sqlite
+.aura-local/modes/*.yaml (user overrides only)
 models/
 ```
 
-Older `%APPDATA%/AgentVoice/config.json` files are migrated into the Aura config directory.
+Runtime configuration, API credentials, microphone selection, skill settings, and storage paths are
+saved in `config.local.json`. Session memory is saved in `.aura-local/history.sqlite`. Both locations
+are project-local, ignored by Git, and excluded from package resource manifests. Aura does not use
+environment variables as an API credential fallback.
+
+Older `%APPDATA%/Aura/config.json` and history files are copied into the project-local locations on
+first launch after an upgrade. Legacy `concise` mode selections are mapped to `coding_agent`.
+
+## Prompt Modes
+
+- `coding_agent` / 标准模式: merged concise + standard behavior with adaptive output depth.
+- `professional` / 专业模式: detailed scope, boundary, risk, execution, and verification guidance;
+  this is the default for new configurations.
 
 ## Verification
 

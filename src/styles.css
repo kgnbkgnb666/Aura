@@ -95,6 +95,7 @@ textarea[readonly] {
   border-radius: 8px;
   background: #ffffff;
   color: #247a68;
+  animation: boot-pulse 1.8s ease-in-out infinite;
 }
 
 .boot-copy {
@@ -131,7 +132,29 @@ textarea[readonly] {
   display: block;
   height: 100%;
   background: #3a9f88;
-  transition: width 180ms ease;
+  transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.boot-progress.active i {
+  background-image: repeating-linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0) 10px,
+    rgba(255, 255, 255, 0.3) 10px,
+    rgba(255, 255, 255, 0.3) 18px
+  );
+  background-size: 36px 100%;
+  animation: boot-progress-flow 900ms linear infinite;
+}
+
+@keyframes boot-progress-flow {
+  from { background-position: 0 0; }
+  to { background-position: 36px 0; }
+}
+
+@keyframes boot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(36, 122, 104, 0); }
+  50% { box-shadow: 0 0 0 5px rgba(36, 122, 104, 0.1); }
 }
 
 .app-shell {
@@ -579,6 +602,71 @@ textarea[readonly] {
 .settings-body input,
 .settings-body select {
   width: 100%;
+}
+
+.setting-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #d9ddd8;
+  border-radius: 6px;
+  background: #f7f9f7;
+  color: #65706b;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.llm-source-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.llm-source-switch button {
+  justify-content: flex-start;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid #d9ddd8;
+  background: #fff;
+}
+
+.llm-source-switch button.active {
+  border-color: #4d6bfe;
+  background: #f2f5ff;
+  color: #2945c7;
+}
+
+.llm-source-switch img {
+  width: 31px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.llm-source-switch span,
+.thinking-toggle span {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.llm-source-switch small,
+.thinking-toggle small {
+  color: #727c77;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.thinking-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+  padding: 8px 10px;
+  border: 1px solid #d9ddd8;
+  border-radius: 6px;
+}
+
+.thinking-toggle input {
+  width: 16px !important;
+  min-height: 16px;
 }
 
 .button-row,

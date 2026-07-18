@@ -8,7 +8,7 @@ class SessionManager:
         self.current = self.new_session(default_mode_id)
 
     def new_session(self, mode_id: str | None = None) -> Session:
-        self.current = Session(id=new_id(), mode_id=mode_id or "codex")
+        self.current = Session(id=new_id(), mode_id=mode_id or "professional")
         return self.current
 
     def set_mode(self, mode_id: str) -> None:
@@ -19,4 +19,3 @@ class SessionManager:
 
     def previous_compiled_text(self) -> str:
         return self.current.latest_compiled_text
-

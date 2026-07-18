@@ -15,8 +15,9 @@ def test_modes_load():
     modes = ModeRegistry(Path("modes")).load()
     ids = {mode.id for mode in modes.all()}
     names = {mode.name for mode in modes.all()}
-    assert {"concise", "coding_agent", "professional"}.issubset(ids)
-    assert {"简洁模式", "标准模式", "专业模式"}.issubset(names)
+    assert ids == {"coding_agent", "professional"}
+    assert names == {"标准模式", "专业模式"}
+    assert modes.get("concise").id == "coding_agent"
     assert modes.get("missing-mode").id in ids
 
 

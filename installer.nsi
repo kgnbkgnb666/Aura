@@ -81,7 +81,6 @@ Section "Uninstall"
   Delete "$INSTDIR\aura.exe"
   Delete "$INSTDIR\aura-sidecar.exe"
   Delete "$INSTDIR\Uninstall.exe"
-  RMDir "$INSTDIR"
 
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\Aura.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall Aura.lnk"
@@ -91,11 +90,14 @@ Section "Uninstall"
   DeleteRegKey HKCU "${PRODUCT_UNINST_KEY}"
   DeleteRegKey HKCU "${PRODUCT_DIR_REGKEY}"
 
-  ; Prompt user to delete user data (config, history, API keys)
-  MessageBox MB_YESNO|MB_ICONQUESTION "是否同时删除用户数据（配置、历史记录、API密钥）？$\n$\n数据位置: %APPDATA%\Aura\$\n$\n如果您计划重新安装，选择【否】可保留配置。" IDNO skip_userdata
-    RMDir /r "$APPDATA\Aura"
+  ; Runtime-created local data is never part of the installer payload.
+  MessageBox MB_YESNO|MB_ICONQUESTION "是否同时删除用户数据（配置、历史记录、API密钥）？$\n$\n数据位置: $INSTDIR\config.local.json 和 $INSTDIR\.aura-local\$\n$\n如果您计划重新安装，选择【否】可保留配置。" IDNO skip_userdata
+    Delete "$INSTDIR\config.local.json"
+    RMDir /r "$INSTDIR\.aura-local"
     MessageBox MB_OK|MB_ICONINFORMATION "用户数据已删除。"
   skip_userdata:
+
+  RMDir "$INSTDIR"
 
   SetAutoClose true
 SectionEnd

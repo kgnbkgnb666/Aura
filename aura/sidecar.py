@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
 import threading
 import time
@@ -16,11 +17,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .compiler import PromptCompiler
-from .config import SettingsStore
+from .config import DEEPSEEK_BASE_URL, DEEPSEEK_MODELS, SettingsStore, is_deepseek_endpoint
 from .models import DeviceInfo, Mode, RecordingResult, Session, Settings, Skill
 from .recorder import AudioRecorder
 from .runtime import ProcessingJobStore, RuntimeLog
 from .service import AuraService
+
+API_KEY_MASK = "********"
 
 
 def _log_dir() -> Path:
@@ -78,6 +81,7 @@ def json_response(payload: Any, status: int = 200) -> bytes:
 
 def settings_payload(settings: Settings) -> JsonDict:
     data = asdict(settings)
+    data["llm_api_key"] = API_KEY_MASK if settings.llm_api_key else ""
     if data.get("history_path"):
         data["history_path"] = str(data["history_path"])
     if data.get("model_cache_dir"):
@@ -185,8 +189,8 @@ def recording_payload(result: RecordingResult) -> JsonDict:
 
 
 class AuraSidecar:
-    def __init__(self, preload_stt: bool = False) -> None:
-        self.settings_store = SettingsStore()
+    def __init__(self, preload_stt: bool = False, settings_store: SettingsStore | None = None) -> None:
+        self.settings_store = settings_store or SettingsStore()
         self.service = AuraService(settings=self.settings_store.load())
         self.logs = RuntimeLog()
         self.jobs = ProcessingJobStore()
@@ -303,7 +307,11 @@ class AuraSidecar:
             )
         with self._lock:
             self.service.modes.save_all(modes)
-            default_mode = modes[0]
+            available_ids = {mode.id for mode in modes}
+            preferred_id = self.service.settings.mode_id
+            if preferred_id not in available_ids:
+                preferred_id = "professional" if "professional" in available_ids else modes[0].id
+            default_mode = next(mode for mode in modes if mode.id == preferred_id)
             self.service.settings.mode_id = default_mode.id
             self.service.sessions.set_mode(default_mode.id)
             self.settings_store.save(self.service.settings)
@@ -397,7 +405,17 @@ class AuraSidecar:
             settings.llm_provider = str(payload.get("llm_provider") or settings.llm_provider)
             settings.llm_base_url = str(payload.get("llm_base_url") or "").strip()
             settings.llm_model = str(payload.get("llm_model") or "").strip()
-            settings.llm_api_key = str(payload.get("llm_api_key") or "")
+            submitted_api_key = str(payload.get("llm_api_key") or "")
+            if submitted_api_key != API_KEY_MASK:
+                settings.llm_api_key = submitted_api_key
+            settings.llm_thinking_enabled = bool(
+                payload.get("llm_thinking_enabled", settings.llm_thinking_enabled)
+            )
+            if settings.llm_provider == "deepseek" or is_deepseek_endpoint(settings.llm_base_url):
+                settings.llm_provider = "deepseek"
+                settings.llm_base_url = DEEPSEEK_BASE_URL
+                if settings.llm_model not in DEEPSEEK_MODELS:
+                    settings.llm_model = "deepseek-v4-flash"
             settings.llm_temperature = float(payload.get("llm_temperature", settings.llm_temperature))
             settings.llm_timeout_seconds = int(payload.get("llm_timeout_seconds", settings.llm_timeout_seconds))
             self.service.compiler = PromptCompiler(self.service._build_llm())
@@ -588,7 +606,7 @@ class AuraSidecar:
         return {"logs": self.logs.recent(), "state": self.state()}
 
 
-def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
+def build_handler(app: AuraSidecar, parent_pid: int | None = None) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "AuraSidecar/1.0"
 
@@ -617,7 +635,12 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
             path = urlparse(self.path).path
             try:
                 if path == "/api/health":
-                    self._send({"ok": True, "app": "Aura", "api_version": 3})
+                    self._send({
+                        "ok": True,
+                        "app": "Aura",
+                        "api_version": 3,
+                        "parent_pid": parent_pid,
+                    })
                 elif path == "/api/state":
                     self._send(app.state())
                 elif path == "/api/devices":
@@ -676,7 +699,28 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+def _process_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        process = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not process:
+            return False
+        try:
+            exit_code = ctypes.c_ulong()
+            return bool(ctypes.windll.kernel32.GetExitCodeProcess(process, ctypes.byref(exit_code))) and exit_code.value == 259
+        finally:
+            ctypes.windll.kernel32.CloseHandle(process)
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def serve(host: str = "127.0.0.1", port: int = 8765, parent_pid: int | None = None) -> None:
     file_log = _setup_logging()
     file_log.info("Aura sidecar starting... (host=%s port=%s)", host, port)
 
@@ -686,7 +730,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
         file_log.critical("Failed to initialize AuraSidecar: %s", traceback.format_exc())
         raise
 
-    server = ThreadingHTTPServer((host, port), build_handler(app))
+    server = ThreadingHTTPServer((host, port), build_handler(app, parent_pid=parent_pid))
 
     # Hook RuntimeLog to also write to file
     _original_add = app.logs.add
@@ -704,15 +748,29 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
         flush=True,
     )
     file_log.info("Aura sidecar listening on %s:%s", host, server.server_port)
-    server.serve_forever()
+    if parent_pid is not None:
+        def watch_parent() -> None:
+            while True:
+                time.sleep(0.75)
+                if not _process_is_alive(parent_pid):
+                    file_log.info("Aura parent process %s exited; stopping sidecar", parent_pid)
+                    server.shutdown()
+                    return
+
+        threading.Thread(target=watch_parent, name="aura-parent-watch", daemon=True).start()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Aura Python sidecar")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
+    parser.add_argument("--parent-pid", type=int)
     args = parser.parse_args()
-    serve(host=args.host, port=args.port)
+    serve(host=args.host, port=args.port, parent_pid=args.parent_pid)
     return 0
 
 

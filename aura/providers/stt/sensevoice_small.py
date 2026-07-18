@@ -156,6 +156,21 @@ class SenseVoiceSmallTranscriber:
 
             try:
                 self._progress = 40
+                model_root = modelscope_cache / "models"
+                sensevoice_cached = any(
+                    model_root.glob("*SenseVoiceSmall*/snapshots/*/model.pt")
+                )
+                vad_cached = any(
+                    model_root.glob("*fsmn*vad*/snapshots/*/model.pt")
+                )
+                models_cached = sensevoice_cached and vad_cached
+                self._status = "loading" if models_cached else "downloading"
+                if status_callback:
+                    status_callback(
+                        "检测到本地模型缓存，正在从磁盘加载"
+                        if models_cached
+                        else "本地模型尚未完整安装，已开始自动下载；首次启动可能需要几分钟"
+                    )
                 # Always pass model *names* (not local snapshot paths) to
                 # AutoModel.  When a local path is passed, FunASR's build_model
                 # skips the hub-download path and the tokenizer/frontend
@@ -174,6 +189,9 @@ class SenseVoiceSmallTranscriber:
                 )
                 log.info("AutoModel created successfully: %s", type(self._model))
                 self._progress = 90
+                self._status = "loading"
+                if status_callback:
+                    status_callback("模型文件已准备完成，正在初始化语音识别引擎")
             except Exception as exc:
                 self._status = "error"
                 self._progress = 0

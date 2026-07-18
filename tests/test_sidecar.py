@@ -1,22 +1,39 @@
+import os
+
+from aura.config import SettingsStore
 from aura.models import RecordingResult
-from aura.sidecar import AuraSidecar, json_response
+from aura.providers.llm import OpenAICompatibleClient
+from aura.sidecar import API_KEY_MASK, AuraSidecar, _process_is_alive, json_response, settings_payload
 
 
-def test_json_response_serializes_paths_and_dataclasses(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def local_app(tmp_path):
+    return AuraSidecar(
+        preload_stt=False,
+        settings_store=SettingsStore(tmp_path / "config.local.json"),
+    )
+
+
+def test_parent_process_liveness_detection():
+    assert _process_is_alive(os.getpid()) is True
+    assert _process_is_alive(0) is False
+
+
+def test_json_response_serializes_paths_and_dataclasses(tmp_path):
+    app = local_app(tmp_path)
     body = json_response(app.state()).decode("utf-8")
     assert '"settings"' in body
     assert '"modes"' in body
     assert '"current_session"' in body
 
 
-def test_sidecar_state_has_frontend_contract(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_sidecar_state_has_frontend_contract(tmp_path):
+    app = local_app(tmp_path)
     state = app.state()
     assert state["settings"]["app_name"] == "Aura"
     assert isinstance(state["modes"], list)
+    assert state["settings"]["mode_id"] == "professional"
+    assert state["current_mode"]["id"] == "professional"
+    assert state["current_session"]["mode_id"] == "professional"
     assert state["runtime"]["recording"] is False
     assert state["runtime"]["latest_job_id"] == ""
     assert state["runtime"]["log_count"] >= 1
@@ -25,9 +42,8 @@ def test_sidecar_state_has_frontend_contract(tmp_path, monkeypatch):
     assert state["service"]["transcriber_progress"] == 0
 
 
-def test_sidecar_job_contract(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_sidecar_job_contract(tmp_path):
+    app = local_app(tmp_path)
     result = RecordingResult(
         wav_path=tmp_path / "test.wav",
         duration_seconds=1.0,
@@ -43,9 +59,8 @@ def test_sidecar_job_contract(tmp_path, monkeypatch):
     assert payload["job"]["phase"] == "compiling"
 
 
-def test_sidecar_logs_contract(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_sidecar_logs_contract(tmp_path):
+    app = local_app(tmp_path)
     app.logs.warning("test", "careful", "details")
     payload = app.recent_logs()
     assert payload["logs"][0]["level"] == "warning"
@@ -56,9 +71,8 @@ def test_sidecar_logs_contract(tmp_path, monkeypatch):
     assert cleared["logs"][0]["message"] == "Logs cleared"
 
 
-def test_sidecar_save_modes_sets_first_mode_as_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_sidecar_save_modes_preserves_current_mode(tmp_path):
+    app = local_app(tmp_path)
     app.service.modes.modes_dir = tmp_path / "modes"
     payload = app.save_modes(
         {
@@ -89,9 +103,8 @@ def test_sidecar_save_modes_sets_first_mode_as_default(tmp_path, monkeypatch):
     assert (tmp_path / "modes" / "001-reviewer.yaml").exists()
 
 
-def test_sidecar_load_session_restores_turn_context(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_sidecar_load_session_restores_turn_context(tmp_path):
+    app = local_app(tmp_path)
     app.service.current_session.add_turn(
         raw_transcript="first request",
         compiled_text="compiled first request",
@@ -121,9 +134,8 @@ def test_sidecar_load_session_restores_turn_context(tmp_path, monkeypatch):
     assert app.service.sessions.previous_compiled_text() == "compiled second request"
 
 
-def test_recompile_overwrites_latest_turn_without_adding_memory(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_recompile_overwrites_latest_turn_without_adding_memory(tmp_path):
+    app = local_app(tmp_path)
     session = app.service.current_session
     original = session.add_turn(
         raw_transcript="old transcript",
@@ -142,9 +154,8 @@ def test_recompile_overwrites_latest_turn_without_adding_memory(tmp_path, monkey
     assert payload["state"]["current_session"]["turn_count"] == 1
 
 
-def test_manual_compiled_edit_overwrites_history_memory(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_manual_compiled_edit_overwrites_history_memory(tmp_path):
+    app = local_app(tmp_path)
     session = app.service.current_session
     original = session.add_turn(
         raw_transcript="original transcript",
@@ -165,9 +176,8 @@ def test_manual_compiled_edit_overwrites_history_memory(tmp_path, monkeypatch):
     assert payload["state"]["current_session"]["turn_count"] == 1
 
 
-def test_delete_history_removes_one_session_and_replaces_current(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_delete_history_removes_one_session_and_replaces_current(tmp_path):
+    app = local_app(tmp_path)
     session = app.service.current_session
     session.add_turn(
         raw_transcript="session to delete",
@@ -186,9 +196,8 @@ def test_delete_history_removes_one_session_and_replaces_current(tmp_path, monke
     assert payload["state"]["history"] == []
 
 
-def test_sidecar_save_skills_updates_settings(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    app = AuraSidecar(preload_stt=False)
+def test_sidecar_save_skills_updates_settings(tmp_path):
+    app = local_app(tmp_path)
 
     payload = app.save_skills(
         {
@@ -210,3 +219,69 @@ def test_sidecar_save_skills_updates_settings(tmp_path, monkeypatch):
     assert payload["state"]["skills"][0]["name"] == "doc"
     assert payload["state"]["skills"][0]["enabled"] is True
     assert app.service.settings.skill_scan_dir.endswith("skills")
+
+
+def test_sidecar_saves_keyless_custom_llm_configuration(tmp_path):
+    app = local_app(tmp_path)
+
+    payload = app.save_llm_settings(
+        {
+            "llm_provider": "openai_compatible",
+            "llm_base_url": "http://127.0.0.1:11434/v1",
+            "llm_model": "llama3.3",
+            "llm_api_key": "",
+            "llm_temperature": 0.2,
+            "llm_timeout_seconds": 60,
+        }
+    )
+
+    assert payload["state"]["settings"]["llm_provider"] == "openai_compatible"
+    assert payload["state"]["settings"]["llm_api_key"] == ""
+    assert isinstance(app.service.compiler.llm, OpenAICompatibleClient)
+    assert app.service.compiler.llm.is_configured is True
+
+
+def test_sidecar_normalizes_legacy_deepseek_endpoint_and_keeps_pro_model(tmp_path):
+    app = local_app(tmp_path)
+
+    payload = app.save_llm_settings(
+        {
+            "llm_provider": "openai_compatible",
+            "llm_base_url": "https://api.deepseek.com/v1/",
+            "llm_model": "deepseek-v4-pro",
+            "llm_api_key": "secret",
+            "llm_thinking_enabled": False,
+        }
+    )
+    settings = payload["state"]["settings"]
+
+    assert settings["llm_provider"] == "deepseek"
+    assert settings["llm_base_url"] == "https://api.deepseek.com"
+    assert settings["llm_model"] == "deepseek-v4-pro"
+    assert settings["llm_thinking_enabled"] is False
+
+
+def test_state_masks_configured_api_key():
+    from aura.models import Settings
+
+    payload = settings_payload(Settings(llm_api_key="secret-value"))
+
+    assert payload["llm_api_key"] == API_KEY_MASK
+
+
+def test_saving_masked_api_key_preserves_existing_secret(tmp_path):
+    app = local_app(tmp_path)
+    app.service.settings.llm_api_key = "existing-secret"
+
+    payload = app.save_llm_settings(
+        {
+            "llm_provider": "deepseek",
+            "llm_base_url": "https://api.deepseek.com",
+            "llm_model": "deepseek-v4-pro",
+            "llm_api_key": API_KEY_MASK,
+            "llm_thinking_enabled": False,
+        }
+    )
+
+    assert app.service.settings.llm_api_key == "existing-secret"
+    assert payload["state"]["settings"]["llm_api_key"] == API_KEY_MASK

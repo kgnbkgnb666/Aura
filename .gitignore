@@ -40,6 +40,8 @@ models/
 *.safetensors
 
 # User data, history, local runtime output
+/config.local.json
+/.aura-local/
 config.json
 history.sqlite
 *.sqlite

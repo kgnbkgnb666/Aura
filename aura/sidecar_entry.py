@@ -11,8 +11,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="aura-sidecar")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
+    parser.add_argument("--parent-pid", type=int)
     args = parser.parse_args()
-    serve(host=args.host, port=args.port)
+    serve(host=args.host, port=args.port, parent_pid=args.parent_pid)
     return 0
 
 

@@ -6,7 +6,11 @@ from pathlib import Path
 
 import yaml
 
+from .config import LOCAL_DATA_DIR_NAME, project_root
 from .models import Mode
+
+
+LEGACY_MODE_IDS = {"concise": "coding_agent"}
 
 
 def _safe_slug(value: str) -> str:
@@ -21,16 +25,24 @@ def _default_modes_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "modes"
 
 
+def _local_modes_dir() -> Path:
+    return project_root() / LOCAL_DATA_DIR_NAME / "modes"
+
+
 class ModeRegistry:
     def __init__(self, modes_dir: Path | None = None) -> None:
-        self.modes_dir = modes_dir or _default_modes_dir()
+        self.builtin_modes_dir = modes_dir or _default_modes_dir()
+        self.modes_dir = modes_dir or _local_modes_dir()
         self._modes: dict[str, Mode] = {}
 
     def load(self) -> "ModeRegistry":
         self._modes.clear()
-        if not self.modes_dir.exists():
+        source_dir = self.modes_dir
+        if not any(source_dir.glob("*.yaml")):
+            source_dir = self.builtin_modes_dir
+        if not source_dir.exists():
             return self
-        for path in sorted(self.modes_dir.glob("*.yaml")):
+        for path in sorted(source_dir.glob("*.yaml")):
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             mode = Mode(
                 id=str(data["id"]),
@@ -46,11 +58,18 @@ class ModeRegistry:
     def get(self, mode_id: str) -> Mode:
         if not self._modes:
             self.load()
+        mode_id = LEGACY_MODE_IDS.get(mode_id, mode_id)
         if mode_id in self._modes:
             return self._modes[mode_id]
         if self._modes:
             return next(iter(self._modes.values()))
-        raise RuntimeError(f"No modes found in {self.modes_dir}")
+        raise RuntimeError(
+            f"No modes found in {self.modes_dir} or {self.builtin_modes_dir}"
+        )
+
+    def resolve_id(self, mode_id: str) -> str:
+        """Resolve legacy or missing mode IDs to a currently available mode."""
+        return self.get(mode_id).id
 
     def all(self) -> list[Mode]:
         if not self._modes:

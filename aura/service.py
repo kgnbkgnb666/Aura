@@ -7,7 +7,7 @@ from pathlib import Path
 import threading
 
 from .compiler import PromptCompiler
-from .config import SettingsStore
+from .config import SettingsStore, is_deepseek_endpoint
 from .history import HistoryStore
 from .models import CompileRequest, Mode, Settings, Session
 from .modes import ModeRegistry
@@ -27,6 +27,7 @@ class AuraService:
     ) -> None:
         self.settings = settings or SettingsStore().load()
         self.modes = modes or ModeRegistry().load()
+        self.settings.mode_id = self.modes.resolve_id(self.settings.mode_id)
         self.sessions = SessionManager(self.settings.mode_id)
         self.history = HistoryStore(self.settings.history_path)
         self.transcriber = self._build_transcriber()
@@ -42,13 +43,25 @@ class AuraService:
         return self.modes.get(self.current_session.mode_id)
 
     def _build_llm(self):
-        if self.settings.llm_api_key:
+        is_deepseek = self.settings.llm_provider == "deepseek" or is_deepseek_endpoint(
+            self.settings.llm_base_url
+        )
+        is_custom = not is_deepseek
+        if self.settings.llm_api_key or (
+            is_custom and self.settings.llm_base_url and self.settings.llm_model
+        ):
             return OpenAICompatibleClient(
                 base_url=self.settings.llm_base_url,
                 api_key=self.settings.llm_api_key,
                 model=self.settings.llm_model,
                 temperature=self.settings.llm_temperature,
                 timeout_seconds=self.settings.llm_timeout_seconds,
+                allow_anonymous=is_custom and not self.settings.llm_api_key,
+                thinking_enabled=(
+                    self.settings.llm_thinking_enabled
+                    if is_deepseek
+                    else None
+                ),
             )
         return RuleBasedCompiler()
 
@@ -57,18 +70,21 @@ class AuraService:
         return SenseVoiceSmallTranscriber(cache_dir=self.settings.model_cache_dir)
 
     def new_session(self, mode_id: str | None = None) -> Session:
-        session = self.sessions.new_session(mode_id or self.settings.mode_id)
+        resolved_mode_id = self.modes.resolve_id(mode_id or self.settings.mode_id)
+        session = self.sessions.new_session(resolved_mode_id)
         return session
 
     def load_session(self, session_id: str) -> Session:
         session = self.history.load_session(session_id)
+        session.mode_id = self.modes.resolve_id(session.mode_id)
         self.sessions.current = session
         self.settings.mode_id = session.mode_id
         return session
 
     def set_mode(self, mode_id: str) -> None:
-        self.settings.mode_id = mode_id
-        self.sessions.set_mode(mode_id)
+        resolved_mode_id = self.modes.resolve_id(mode_id)
+        self.settings.mode_id = resolved_mode_id
+        self.sessions.set_mode(resolved_mode_id)
 
     def warm_up_transcriber(self, on_status: TextCallback | None = None) -> None:
         if self.transcriber.is_ready:

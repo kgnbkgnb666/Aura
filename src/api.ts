@@ -25,6 +25,7 @@ export type Settings = {
   llm_base_url: string;
   llm_api_key: string;
   llm_model: string;
+  llm_thinking_enabled: boolean;
   llm_temperature: number;
   llm_timeout_seconds: number;
   auto_launch: boolean;
@@ -144,6 +145,10 @@ export async function ensureSidecar(): Promise<void> {
   if (!health.ok || health.app !== "Aura" || health.api_version !== 3) {
     throw new Error("Aura sidecar protocol mismatch. Stop old sidecar processes and restart Aura.");
   }
+}
+
+export function hideMainWindow(): Promise<void> {
+  return invoke<void>("hide_window");
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

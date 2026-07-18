@@ -39,7 +39,7 @@ class Skill:
 @dataclass(slots=True)
 class Settings:
     app_name: str = "Aura"
-    mode_id: str = "coding_agent"
+    mode_id: str = "professional"
     auto_copy: bool = True
     save_history: bool = True
     keep_window_on_top: bool = False
@@ -48,10 +48,11 @@ class Settings:
     input_device_index: int | None = None
     stt_provider: str = "sensevoice-small"
     model_cache_dir: Path | None = None
-    llm_provider: str = "openai_compatible"
+    llm_provider: str = "deepseek"
     llm_base_url: str = "https://api.deepseek.com"
     llm_api_key: str = ""
-    llm_model: str = "deepseek-chat"
+    llm_model: str = "deepseek-v4-flash"
+    llm_thinking_enabled: bool = False
     llm_temperature: float = 0.2
     llm_timeout_seconds: int = 60
     auto_launch: bool = False
