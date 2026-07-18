@@ -19,7 +19,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .compiler import PromptCompiler
-from .config import DEEPSEEK_BASE_URL, DEEPSEEK_MODELS, SettingsStore, is_deepseek_endpoint
+from .config import (
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODELS,
+    SettingsStore,
+    environment_llm_api_key,
+    is_deepseek_endpoint,
+)
 from .models import DeviceInfo, Mode, RecordingResult, Session, Settings, Skill
 from .recorder import AudioRecorder
 from .runtime import ProcessingJobStore, RuntimeLog
@@ -96,6 +102,7 @@ def json_response(payload: Any, status: int = 200) -> bytes:
 def settings_payload(settings: Settings) -> JsonDict:
     data = asdict(settings)
     data["llm_api_key"] = API_KEY_MASK if settings.llm_api_key else ""
+    data["llm_api_key_source"] = "environment" if environment_llm_api_key() else "configuration"
     if data.get("history_path"):
         data["history_path"] = str(data["history_path"])
     if data.get("model_cache_dir"):
@@ -421,9 +428,13 @@ class AuraSidecar:
             settings.llm_provider = str(payload.get("llm_provider") or settings.llm_provider)
             settings.llm_base_url = str(payload.get("llm_base_url") or "").strip()
             settings.llm_model = str(payload.get("llm_model") or "").strip()
-            submitted_api_key = str(payload.get("llm_api_key") or "")
-            if submitted_api_key != API_KEY_MASK:
-                settings.llm_api_key = submitted_api_key
+            environment_key = environment_llm_api_key()
+            if environment_key:
+                settings.llm_api_key = environment_key
+            else:
+                submitted_api_key = str(payload.get("llm_api_key") or "")
+                if submitted_api_key != API_KEY_MASK:
+                    settings.llm_api_key = submitted_api_key
             settings.llm_thinking_enabled = bool(
                 payload.get("llm_thinking_enabled", settings.llm_thinking_enabled)
             )

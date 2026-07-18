@@ -18,6 +18,32 @@ def test_new_local_config_defaults_to_professional_and_ignores_api_key_env(tmp_p
     assert store.path.exists()
 
 
+def test_aura_api_key_environment_override_is_used_without_being_persisted(tmp_path, monkeypatch):
+    monkeypatch.setenv("AURA_LLM_API_KEY", "environment-secret")
+    store = SettingsStore(tmp_path / "config.local.json")
+
+    settings = store.load()
+    store.save(settings)
+    saved = json.loads(store.path.read_text(encoding="utf-8"))
+
+    assert settings.llm_api_key == "environment-secret"
+    assert saved["llm_api_key"] == ""
+
+
+def test_environment_override_preserves_existing_configured_key(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.local.json"
+    config_path.write_text(json.dumps({"llm_api_key": "configured-secret"}), encoding="utf-8")
+    monkeypatch.setenv("AURA_LLM_API_KEY", "environment-secret")
+    store = SettingsStore(config_path)
+
+    settings = store.load()
+    store.save(settings)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert settings.llm_api_key == "environment-secret"
+    assert saved["llm_api_key"] == "configured-secret"
+
+
 def test_legacy_appdata_is_copied_and_concise_mode_is_mapped(tmp_path):
     legacy_dir = tmp_path / "legacy" / "Aura"
     legacy_dir.mkdir(parents=True)

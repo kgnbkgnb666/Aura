@@ -1,206 +1,216 @@
 <div align="center">
 
-# Aura
+# ✨ Aura
 
-### 把零散的口述想法，变成 AI Agent 真正好用的提示词
+### 让每一个模糊的念头，都变成 AI 能真正执行的清晰任务
 
-本地语音识别 · 上下文续写 · 流式整理 · 一键复制
+🎙️ 说出想法　·　🧠 看见思路　·　🛠️ 唤醒 Skills　·　🚀 交给 Agent
 
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Platform](https://img.shields.io/badge/平台-Windows-0078D4?logo=windows)
-![Status](https://img.shields.io/badge/状态-早期预览-orange)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)
+![Local STT](https://img.shields.io/badge/STT-Local--first-22C55E)
+
+**不必学习 Prompt Engineering。你只管思考，Aura 帮你问清楚。**
 
 </div>
 
 ---
 
-Aura 是一款面向 Codex、Claude Code、Cursor、ChatGPT 等 AI 工具的桌面语音工作台。
+## 🌌 一个想法，最开始本来就不应该是清晰的
 
-按住空格说出需求，Aura 会在本地完成语音转写，再把口语中的重复、跳跃和模糊表达整理成结构清晰、可直接交给 AI Agent 执行的提示词。原始转写始终可见，整理结果会流式输出；开启自动复制后，说完即可粘贴使用。
+你打开 Codex、Claude Code 或 Cursor，光标在闪。
 
-> 当前版本处于早期预览阶段，优先支持 Windows，适合开发者体验与共同建设，暂不建议用于关键生产流程。
+你知道自己大概想做什么：也许是改一个功能，也许是修一个 Bug，也许只是脑中突然冒出一个还没成形的点子。但当你准备输入时，却发现很难把它一次写清楚。
 
-## 为什么做 Aura？
+目标是什么？边界在哪里？先做什么？怎样才算完成？
 
-键盘适合精确编辑，语音更适合快速倾倒思路。问题在于，未经整理的口述通常充满停顿、补充和上下文跳跃，直接交给 AI 往往得不到稳定结果。
+你写了几句，删掉；又补了几句，还是觉得 AI 可能理解错。
 
-Aura 把这段流程压缩成四步：
+这不是你不会表达。**人的思考原本就是从模糊走向清晰的。** 很多好想法，并不是先想完整再说出来，而是在说出来、看见它、修改它的过程中，才真正成形。
+
+这就是 Aura 诞生的原因。
 
 ```text
-按住空格说话 → SenseVoice 本地转写 → LLM 按模式整理 → 自动复制结果
+一个模糊的念头
+      ↓
+先把它说出来
+      ↓
+Aura 生成第一版清晰表达
+      ↓
+你看见自己的思路，再补充、再修改
+      ↓
+成为 Agent 可以准确执行的任务
 ```
 
-它不试图替代你的 AI 工具，只负责把“脑中的需求”更顺畅地送进去。
+Aura 不要求你一开始就有答案。它先接住你的想法，再陪你把它照亮。
 
-## 核心能力
+## 🎙️ 为什么是语音？
 
-- **本地语音识别**：基于 SenseVoice-Small，音频转写默认在本机完成。
-- **Agent 友好的提示词整理**：去除口语冗余，并补足目标、范围、约束与验收条件。
-- **上下文会话**：连续口述可以继承同一会话中的历史信息。
-- **流式反馈**：先展示原始转写，再持续输出整理结果，不必盯着空白界面等待。
-- **可编辑模式**：通过 YAML 定义标准、专业或自己的提示词编译模式。
-- **兼容多种模型服务**：内置 DeepSeek 配置，并支持 OpenAI-compatible 接口、Ollama、vLLM 等服务。
-- **无 API Key 也能体验**：自动退回本地规则整理器，方便验证完整交互流程。
-- **桌面快捷操作**：全局唤起、按住说话、新建会话、切换模式与自动复制。
-- **本地历史记录**：设置与会话数据保存在本机，支持清理。
+因为当思路还模糊时，打字太容易让人提前追求“正确的句子”。你会停下来斟酌措辞，思路也随之中断。
 
-## 快速开始
+说话不同。
 
-### 环境要求
+你可以边想边说，可以犹豫、补充、推翻，也可以先描述感受，再慢慢靠近真正的问题。语言是人类最自然的思考界面，而大模型恰好擅长从这些不完整的线索中理解意图、寻找结构。
 
-- Windows 10/11（当前主要支持平台）
-- Python 3.10 或 3.11
-- Node.js 20.19+ 或 22.12+
-- Rust stable 与 Visual Studio C++ Build Tools（运行 Tauri 桌面端时需要）
-- 可用的麦克风
+Aura 把两者连接起来：
 
-### 从源码运行
+- 🎤 **你负责说**：不用组织格式，不用背 Prompt 模板。
+- 🧩 **Aura 负责理解**：识别目标、上下文、约束和隐藏的重点。
+- ✍️ **你负责确认**：先看到初版，再按照真实想法调整。
+- 🤖 **Agent 负责执行**：拿到清晰、完整、可行动的任务。
+
+## 🚀 Agent 时代，真正拉开差距的是“怎么问”
+
+AI 越来越强，人们需要亲手完成的重复工作越来越少。我们每天最重要的工作，正在从“自己做”变成“告诉 AI 应该做什么”。
+
+同样的模型、同样的工具，不同的人得到的质量和效率却完全不同。差别往往不在模型，而在那个最容易被忽略的环节：
+
+> **你有没有把问题问清楚？**
+
+很多人并不知道怎样写 Prompt，也不应该被迫学习一整套枯燥的 Prompt Engineering。人应该专注于目标、判断和创造，而不是研究怎样讨好一个输入框。
+
+**Aura 的使命，就是成为人与 Agent 之间的表达层。**
+
+让每个人都能自然地说出想法，让 AI 帮助人看清自己的思路，再把它翻译成 Agent 真正理解的任务。未来每个人都可以拥有强大的 Agent，而 Aura 希望让每个人都能把这份力量用好。
+
+## 🛠️ 让沉睡的 Skills 再次工作
+
+你可能已经收藏、安装甚至亲手写过很多 Skills。
+
+但时间一长，它们散落在不同目录里：什么时候该用哪一个、它能解决什么问题、该怎样触发，慢慢都忘记了。能力明明存在，却像工具箱里落了灰的工具。
+
+Aura 会扫描 Skill 描述，根据你当前说出的任务匹配最相关的能力，并把它带入本次提示词整理过程。
+
+```text
+“帮我把这份调研整理成一份演示文稿”
+                    ↓
+Aura 理解任务意图并匹配演示文稿 Skill
+                    ↓
+生成包含正确工具、目标和交付要求的 Agent 任务
+```
+
+你不必记住每个 Skill 的名字。**你记住自己想完成什么，就够了。**
+
+## 💫 Aura 能为你做什么？
+
+- 🎙️ **按住即说**：按住空格开始，松开后自动处理。
+- 🧠 **让思路逐渐成形**：保留原始转写，同时生成可继续修改的清晰初版。
+- ✨ **自动整理 Prompt**：补全目标、范围、约束、步骤和验收方式。
+- 🛠️ **自动匹配 Skills**：从已有能力中找到适合当前任务的 Skill。
+- 🔗 **记住会话上下文**：连续补充想法，不必每次从头解释。
+- ⚡ **流式生成结果**：转写完成立即可见，整理内容持续出现。
+- 📋 **自动复制**：整理完成即可粘贴到任何 Agent 工具。
+- 🎯 **多种表达模式**：简单任务保持直接，复杂任务自动变得专业完整。
+- 🌍 **兼容主流模型服务**：支持 DeepSeek、OpenAI-compatible、Ollama、vLLM 等接口。
+
+## 🛡️ 本地语音识别：隐私、自由、免费
+
+Aura 使用 SenseVoice-Small 在本地完成语音识别。
+
+- 🏠 **语音留在本机**：原始声音不需要上传到在线 STT 服务。
+- 🔐 **保护真实表达**：会议想法、代码需求和未公开创意都可以放心说。
+- 💸 **无需按分钟付费**：模型准备好后，可以持续使用本地转写。
+- 🚄 **不依赖网络转写**：减少云端语音服务带来的等待。
+
+如果启用 LLM 整理，Aura 只把转写后的文字发送到你自己选择的模型服务。你也可以连接本地 Ollama 或 vLLM，让整个过程都在自己的设备中完成。
+
+## ⚡ 随叫随到，别让灵感等待
+
+Aura 是一个真正为开发工作流设计的桌面伙伴。
+
+| 快捷键 | 动作 |
+| --- | --- |
+| `Ctrl + Shift + Space` | ⚡ 在任何位置唤起 / 隐藏 Aura |
+| 按住 `Space` | 🎙️ 开始说话，松开后处理 |
+| `Ctrl + N` | 📝 开始一个新会话 |
+| `Ctrl + ↑` / `Ctrl + ↓` | 🎯 快速切换整理模式 |
+| `Esc` | 🌙 隐藏窗口，回到当前工作 |
+
+灵感出现时，按下快捷键就说。几秒后，一段清晰的任务已经可以交给 Agent。
+
+## 🏁 快速上手
+
+### 1️⃣ 准备环境
+
+你需要 Windows 10/11、Python 3.10 或 3.11、Node.js 20.19+、Rust stable 和 Visual Studio C++ Build Tools。
+
+### 2️⃣ 下载并启动 Aura
+
+打开 PowerShell，依次执行：
 
 ```powershell
-git clone <你的仓库地址>
+# 下载 Aura 源码到当前目录
+git clone https://github.com/kgnbkgnb666/Aura.git
+
+# 进入 Aura 项目目录
 cd Aura
 
+# 创建独立的 Python 虚拟环境，避免影响系统环境
 python -m venv .venv
+
+# 激活刚刚创建的虚拟环境
 .\.venv\Scripts\Activate.ps1
+
+# 升级 Python 包管理工具
 python -m pip install --upgrade pip
+
+# 安装本地语音识别与 Aura 所需依赖
 python -m pip install -r requirements.txt
 
+# 按锁定版本安装桌面端依赖
 npm ci
+
+# 启动完整的 Aura 桌面应用
 npm run tauri:dev
 ```
 
-首次使用时，SenseVoice 模型可能需要下载并初始化，请预留数分钟和足够磁盘空间。启动后进入“LLM 设置”，填写服务地址、模型和 API Key；不填写 API Key 时会使用本地规则整理器。
+第一次启动时，Aura 会准备本地语音模型。完成后，按住 `Space` 说出你的第一个想法。
 
-## 快捷键
+### 3️⃣ 推荐：用环境变量配置 API Key
 
-| 快捷键 | 功能 |
-| --- | --- |
-| `Ctrl + Shift + Space` | 显示 / 隐藏 Aura |
-| 按住 `Space` | 录音，松开后开始处理 |
-| `Ctrl + N` | 新建会话 |
-| `Ctrl + ↑` / `Ctrl + ↓` | 切换提示词模式 |
-| `Esc` | 隐藏窗口 |
+Aura 支持通过 `AURA_LLM_API_KEY` 读取密钥。环境变量的优先级高于界面配置，并且不会被 Aura 写入项目配置文件。
 
-> `Space` 录音仅在 Aura 窗口获得焦点时生效，避免影响其他应用中的正常输入。
-
-## 技术架构
-
-| 层级 | 技术 | 职责 |
-| --- | --- | --- |
-| 桌面外壳 | Tauri 2 / Rust | 窗口、托盘、快捷键、开机启动与 sidecar 生命周期 |
-| 用户界面 | React / TypeScript / Vite | 录音交互、会话、设置、状态与流式结果展示 |
-| 本地服务 | Python sidecar | HTTP API、任务调度、配置与业务编排 |
-| 语音识别 | SenseVoice-Small / FunASR | 本地音频转写与模型缓存 |
-| 提示词整理 | Provider 抽象层 | DeepSeek / OpenAI-compatible / 本地规则回退 |
-| 数据 | JSON / SQLite / YAML | 设置、历史会话与提示词模式 |
-
-```text
-React WebView
-    │  带会话令牌的 localhost HTTP
-    ▼
-Python sidecar
-    ├── AudioRecorder ──► SenseVoice-Small
-    ├── PromptCompiler ─► LLM Provider
-    ├── ModeRegistry  ──► YAML 模式
-    └── HistoryStore  ──► SQLite
-```
-
-核心扩展点：
-
-- `aura/providers/stt/`：新增语音识别 Provider。
-- `aura/providers/llm/`：新增模型服务 Provider。
-- `modes/`：新增或修改提示词整理模式。
-- `aura/service.py`：业务编排入口。
-- `aura/sidecar.py`：桌面端与 Python 核心之间的 API 边界。
-
-## 本地数据与隐私
-
-Aura 默认使用以下项目本地路径：
-
-```text
-config.local.json            # 应用设置；当前包含明文 API Key
-.aura-local/history.sqlite   # 会话历史
-.aura-local/modes/*.yaml     # 用户自定义模式
-models/                      # 本地模型缓存
-```
-
-这些路径已经加入 `.gitignore`，不会被正常提交。录音临时文件会在处理结束后删除。sidecar 只监听 `127.0.0.1`，桌面端启动时会生成随机会话令牌，所有业务接口都需要令牌，并限制可跨域访问的 WebView 来源。
-
-请注意：**API Key 目前仍以明文保存在 `config.local.json` 中**。文件会尽量设置为仅当前用户可读，但这不等同于系统级加密。不要上传或分享该文件；后续版本计划接入 Windows Credential Manager、macOS Keychain 和 Linux Secret Service。
-
-云端整理模式会把转写文本发送给你配置的 LLM 服务；本地规则整理器不会发送文本。具体数据政策以对应模型服务商为准。
-
-## 开发与验证
-
-只启动 Python sidecar（终端会打印本次会话令牌）：
+只在当前 PowerShell 会话中使用：
 
 ```powershell
-python -m aura.sidecar --host 127.0.0.1 --port 8765
-```
+# 把“你的 API Key”替换为真实密钥；关闭终端后自动失效
+$env:AURA_LLM_API_KEY="你的 API Key"
 
-只启动前端：
-
-```powershell
-npm run dev
-```
-
-运行完整桌面端：
-
-```powershell
+# 从同一个终端启动 Aura，让应用继承这个环境变量
 npm run tauri:dev
 ```
 
-执行项目检查：
+保存为 Windows 当前用户环境变量：
 
 ```powershell
-python -m pytest -q
-npm run build
-cargo check --locked --manifest-path src-tauri\Cargo.toml
-npm audit
+# 设置当前 Windows 用户的 Aura 专用 API Key
+[Environment]::SetEnvironmentVariable("AURA_LLM_API_KEY", "你的 API Key", "User")
+
+# 重新打开终端或重启 Aura，使新环境变量生效
 ```
 
-### 构建 Windows 安装包
+然后在 Aura 的 LLM 设置中选择模型服务和模型即可。没有 API Key 时，Aura 也会使用本地规则整理器完成基础体验。
 
-```powershell
-python -m pip install -r requirements-build.txt
-npm ci
-npm run tauri:build
-```
+## 🌱 三步开始创造
 
-构建过程会先将 Python sidecar 打包为独立可执行文件，再生成 NSIS 安装包。由于本地语音模型运行时依赖较多，sidecar 体积目前较大，后续仍有明显的瘦身空间。
+1. ⚡ 按 `Ctrl + Shift + Space` 唤起 Aura。
+2. 🎙️ 按住 `Space`，像对一位懂你的同事那样说出想法。
+3. ✨ 松开空格，看着模糊的念头变成清晰任务，然后复制给你的 Agent。
 
-## 路线图
+不满意第一版？直接修改，或者继续说。**清晰不是开始思考的前提，而是 Aura 和你一起工作的结果。**
 
-- [ ] 将 `App.tsx` 拆分为独立功能模块并补齐前端测试
-- [ ] 使用系统凭据库安全保存 API Key
-- [ ] 优化 sidecar 与模型依赖的安装包体积
-- [ ] 增加 macOS / Linux 的构建与设备兼容验证
-- [ ] 提供 GitHub Releases 与自动化发布流水线
-- [ ] 丰富 STT、LLM Provider 和社区提示词模式
-- [ ] 完善无障碍、国际化与错误恢复体验
+## 🤝 一起定义人与 Agent 的新界面
 
-## 参与贡献
+Aura 不只是一个语音输入框。它想解决的是 Agent 时代最基础、也最重要的问题：如何让人的意图，被机器准确理解和执行。
 
-欢迎提交 Issue、模式配置、Provider、文档与代码改进。开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；安全问题请不要公开披露，处理方式见 [SECURITY.md](SECURITY.md)。
-
-这个项目最适合从以下方向参与：
-
-- 分享真实语音输入场景和失败案例
-- 贡献新的 `modes/*.yaml`
-- 接入新的本地或云端 STT / LLM Provider
-- 改进 Windows 安装体验和跨平台兼容性
-- 补充自动化测试、性能基准与隐私保护
-
-## 开源许可
-
-仓库目前尚未添加正式许可证。首次公开发布前，维护者需要选择并提交 `LICENSE` 文件；在此之前，默认著作权规则仍然适用，其他人没有自动获得复制、修改和分发代码的许可。
-
----
+欢迎贡献新的 Skills、整理模式、模型 Provider、使用场景和产品想法。请阅读 [贡献指南](CONTRIBUTING.md)，让我们一起把“会问 AI”从少数人的技巧，变成每个人自然拥有的能力。
 
 <div align="center">
 
-如果 Aura 让你少敲一点键盘、让 AI 更懂你的需求，欢迎 Star、试用并分享反馈。
+### 🌟 你负责产生想法，Aura 负责让它清晰
+
+如果你也相信人与 AI 之间需要一种更自然的表达方式，欢迎 Star、体验并加入 Aura。
 
 </div>

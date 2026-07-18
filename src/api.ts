@@ -24,6 +24,7 @@ export type Settings = {
   llm_provider: string;
   llm_base_url: string;
   llm_api_key: string;
+  llm_api_key_source?: "environment" | "configuration";
   llm_model: string;
   llm_thinking_enabled: boolean;
   llm_temperature: number;

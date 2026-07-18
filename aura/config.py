@@ -16,6 +16,12 @@ LOCAL_CONFIG_NAME = "config.local.json"
 LOCAL_DATA_DIR_NAME = ".aura-local"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+LLM_API_KEY_ENV = "AURA_LLM_API_KEY"
+
+
+def environment_llm_api_key() -> str:
+    """Return Aura's explicit API key override without importing provider-specific variables."""
+    return os.environ.get(LLM_API_KEY_ENV, "").strip()
 
 
 def is_deepseek_endpoint(value: str) -> bool:
@@ -102,12 +108,12 @@ class SettingsStore:
 
         if not self.path.exists():
             self.save(settings)
-            return settings
-
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"Invalid local configuration file: {self.path}") from exc
+            data: dict[str, Any] = {}
+        else:
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(f"Invalid local configuration file: {self.path}") from exc
 
         # Consolidate legacy built-in provider choices into the single DeepSeek default.
         # Non-DeepSeek endpoints remain available through the custom compatible interface.
@@ -144,6 +150,9 @@ class SettingsStore:
             settings.model_cache_dir = self.root_dir / "models"
         if settings.stt_provider != "sensevoice-small":
             settings.stt_provider = "sensevoice-small"
+        environment_key = environment_llm_api_key()
+        if environment_key:
+            settings.llm_api_key = environment_key
         return settings
 
     def _write_payload(self, payload: dict[str, Any]) -> None:
@@ -164,6 +173,16 @@ class SettingsStore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         settings.history_path = self.history_path
         payload: dict[str, Any] = asdict(settings)
+        if environment_llm_api_key():
+            # Never copy an environment-provided secret into project-local configuration.
+            persisted_key = ""
+            if self.path.exists():
+                try:
+                    existing = json.loads(self.path.read_text(encoding="utf-8"))
+                    persisted_key = str(existing.get("llm_api_key") or "")
+                except (OSError, json.JSONDecodeError):
+                    pass
+            payload["llm_api_key"] = persisted_key
         if payload.get("history_path"):
             payload["history_path"] = str(payload["history_path"])
         if payload.get("model_cache_dir"):
