@@ -1,6 +1,6 @@
 numpy>=1.26
 pyaudio>=0.2.14
-requests>=2.31
+requests>=2.34.2
 PyYAML>=6.0
 funasr>=1.2
 modelscope>=1.17
