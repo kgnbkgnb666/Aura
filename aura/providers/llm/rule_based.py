@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Iterable
 
@@ -58,19 +59,17 @@ def _match_tokens(value: str) -> set[str]:
     return tokens
 
 
-def _matching_skills(user_text: str, transcript: str) -> list[str]:
-    marker = "当前可使用 Skill（名称、描述、使用示例）："
-    if marker not in user_text:
-        return []
-    section = user_text.split(marker, 1)[1].split("请参考 Skill 的使用示例", 1)[0]
+def _matching_skills(skills: list[dict[str, str]], transcript: str) -> list[str]:
     transcript_lower = transcript.lower()
     transcript_tokens = _match_tokens(transcript)
     matches: list[str] = []
-    for block in re.split(r"\n\s*\n(?=\d+\. )", section.strip()):
-        first_line, _, details = block.partition("\n")
-        name = re.sub(r"^\d+\.\s*", "", first_line).strip()
+    for skill in skills:
+        name = str(skill.get("name") or "").strip()
         if not name:
             continue
+        details = " ".join(
+            str(skill.get(key) or "") for key in ("category", "description", "example")
+        )
         name_tokens = [token for token in re.split(r"[-_\s]+", name.lower()) if len(token) >= 3]
         exact_name_match = name.lower() in transcript_lower or any(
             token in transcript_lower for token in name_tokens
@@ -93,23 +92,36 @@ class RuleBasedCompiler:
 
     def chat(self, messages: list[dict[str, str]]) -> str:
         user_text = messages[-1]["content"]
-        transcript = user_text.split("本次原始语音转录：")[-1].strip()
-        previous = ""
-        if "上一版 AI 编译结果：" in user_text:
-            previous = user_text.split("上一版 AI 编译结果：", 1)[1].split(
-                "这次输入是对上一版", 1
-            )[0].strip()
+        evidence_text = user_text.split("输入证据（JSON）：", 1)[-1].strip()
+        try:
+            evidence = json.loads(evidence_text)
+        except json.JSONDecodeError:
+            evidence = {"current_transcript": user_text, "available_skills": []}
+        transcript = str(evidence.get("current_transcript") or "").strip()
+        previous = str(evidence.get("previous_compiled_prompt") or "").strip()
+        merge_output = bool(evidence.get("merge_output", True))
+        available_skills = evidence.get("available_skills") or []
+        if not isinstance(available_skills, list):
+            available_skills = []
 
         risky = any(word.lower() in transcript.lower() for word in RISK_WORDS)
-        matched_skills = _matching_skills(user_text, transcript)
-        lines = [
-            "请完成以下任务：",
-            "",
-            "目标：",
-            f"- {transcript}",
-        ]
-        if previous:
-            lines.extend(["", "已有上下文：", previous])
+        matched_skills = _matching_skills(
+            [skill for skill in available_skills if isinstance(skill, dict)], transcript
+        )
+        lines = ["请完成以下任务："]
+        if previous and merge_output:
+            lines.extend(
+                [
+                    "",
+                    "已有需求（继续保留）：",
+                    previous,
+                    "",
+                    "新增或修订需求：",
+                    f"- {transcript}",
+                ]
+            )
+        else:
+            lines.extend(["", "目标：", f"- {transcript}"])
         if matched_skills:
             lines.extend(["", "可用能力："])
             lines.extend(

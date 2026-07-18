@@ -17,6 +17,8 @@ LOCAL_DATA_DIR_NAME = ".aura-local"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
 LLM_API_KEY_ENV = "AURA_LLM_API_KEY"
+SUPPORTED_STT_PROVIDERS = {"sensevoice-small", "whisper-large-v3"}
+SUPPORTED_UI_THEMES = {"morning", "night"}
 
 
 def environment_llm_api_key() -> str:
@@ -94,7 +96,7 @@ class SettingsStore:
         source_history = Path(raw_history_path) if raw_history_path else self.legacy_dir / "history.sqlite"
         self._copy_history(source_history)
         data["history_path"] = str(self.history_path)
-        if data.get("mode_id") == "concise":
+        if data.get("mode_id") in {"concise", "professional"}:
             data["mode_id"] = "coding_agent"
         self._write_payload(data)
 
@@ -142,20 +144,23 @@ class SettingsStore:
         if old_history_path and old_history_path != self.history_path:
             self._copy_history(old_history_path)
         settings.history_path = self.history_path
-        if settings.mode_id == "concise":
+        if settings.mode_id in {"concise", "professional"}:
             settings.mode_id = "coding_agent"
         if getattr(sys, "frozen", False):
             settings.model_cache_dir = self.root_dir / "models"
         elif settings.model_cache_dir is None or settings.model_cache_dir.name == "huggingface":
             settings.model_cache_dir = self.root_dir / "models"
-        if settings.stt_provider != "sensevoice-small":
+        if settings.stt_provider not in SUPPORTED_STT_PROVIDERS:
             settings.stt_provider = "sensevoice-small"
-        environment_key = environment_llm_api_key()
-        if environment_key:
-            settings.llm_api_key = environment_key
+        if settings.ui_theme not in SUPPORTED_UI_THEMES:
+            settings.ui_theme = "morning"
+        settings.llm_api_key = environment_llm_api_key()
+        if "llm_api_key" in data:
+            self.save(settings)
         return settings
 
     def _write_payload(self, payload: dict[str, Any]) -> None:
+        payload.pop("llm_api_key", None)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
         temporary.write_text(
@@ -173,16 +178,7 @@ class SettingsStore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         settings.history_path = self.history_path
         payload: dict[str, Any] = asdict(settings)
-        if environment_llm_api_key():
-            # Never copy an environment-provided secret into project-local configuration.
-            persisted_key = ""
-            if self.path.exists():
-                try:
-                    existing = json.loads(self.path.read_text(encoding="utf-8"))
-                    persisted_key = str(existing.get("llm_api_key") or "")
-                except (OSError, json.JSONDecodeError):
-                    pass
-            payload["llm_api_key"] = persisted_key
+        payload.pop("llm_api_key", None)
         if payload.get("history_path"):
             payload["history_path"] = str(payload["history_path"])
         if payload.get("model_cache_dir"):

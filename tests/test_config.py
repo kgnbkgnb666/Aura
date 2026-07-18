@@ -3,13 +3,13 @@ import json
 from aura.config import SettingsStore
 
 
-def test_new_local_config_defaults_to_professional_and_ignores_api_key_env(tmp_path, monkeypatch):
+def test_new_local_config_defaults_to_standard_and_ignores_provider_api_key_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "must-not-be-imported")
     store = SettingsStore(tmp_path / "config.local.json")
 
     settings = store.load()
 
-    assert settings.mode_id == "professional"
+    assert settings.mode_id == "coding_agent"
     assert settings.llm_api_key == ""
     assert settings.llm_provider == "deepseek"
     assert settings.llm_model == "deepseek-v4-flash"
@@ -27,10 +27,10 @@ def test_aura_api_key_environment_override_is_used_without_being_persisted(tmp_p
     saved = json.loads(store.path.read_text(encoding="utf-8"))
 
     assert settings.llm_api_key == "environment-secret"
-    assert saved["llm_api_key"] == ""
+    assert "llm_api_key" not in saved
 
 
-def test_environment_override_preserves_existing_configured_key(tmp_path, monkeypatch):
+def test_environment_override_removes_existing_configured_key(tmp_path, monkeypatch):
     config_path = tmp_path / "config.local.json"
     config_path.write_text(json.dumps({"llm_api_key": "configured-secret"}), encoding="utf-8")
     monkeypatch.setenv("AURA_LLM_API_KEY", "environment-secret")
@@ -41,7 +41,7 @@ def test_environment_override_preserves_existing_configured_key(tmp_path, monkey
     saved = json.loads(config_path.read_text(encoding="utf-8"))
 
     assert settings.llm_api_key == "environment-secret"
-    assert saved["llm_api_key"] == "configured-secret"
+    assert "llm_api_key" not in saved
 
 
 def test_legacy_appdata_is_copied_and_concise_mode_is_mapped(tmp_path):
@@ -66,10 +66,12 @@ def test_legacy_appdata_is_copied_and_concise_mode_is_mapped(tmp_path):
     settings = store.load()
 
     assert settings.mode_id == "coding_agent"
-    assert settings.llm_api_key == "legacy-key"
+    assert settings.llm_api_key == ""
     assert settings.history_path == project_dir / ".aura-local" / "history.sqlite"
     assert settings.history_path.read_bytes() == b"legacy-history"
     assert (legacy_dir / "config.json").exists()
+    migrated = json.loads(store.path.read_text(encoding="utf-8"))
+    assert "llm_api_key" not in migrated
 
 
 def test_clear_all_data_only_removes_project_local_runtime_files(tmp_path):
@@ -104,3 +106,25 @@ def test_legacy_deepseek_v1_configuration_is_recognized(tmp_path):
     assert settings.llm_provider == "deepseek"
     assert settings.llm_base_url == "https://api.deepseek.com"
     assert settings.llm_model == "deepseek-v4-flash"
+
+
+def test_legacy_professional_mode_is_mapped_to_unified_standard(tmp_path):
+    config_path = tmp_path / "config.local.json"
+    config_path.write_text(json.dumps({"mode_id": "professional"}), encoding="utf-8")
+
+    settings = SettingsStore(config_path).load()
+
+    assert settings.mode_id == "coding_agent"
+
+
+def test_stt_provider_and_theme_are_persisted(tmp_path):
+    store = SettingsStore(tmp_path / "config.local.json")
+    settings = store.load()
+    settings.stt_provider = "whisper-large-v3"
+    settings.ui_theme = "night"
+
+    store.save(settings)
+    restored = store.load()
+
+    assert restored.stt_provider == "whisper-large-v3"
+    assert restored.ui_theme == "night"

@@ -44,9 +44,9 @@ def test_sidecar_state_has_frontend_contract(tmp_path):
     state = app.state()
     assert state["settings"]["app_name"] == "Aura"
     assert isinstance(state["modes"], list)
-    assert state["settings"]["mode_id"] == "professional"
-    assert state["current_mode"]["id"] == "professional"
-    assert state["current_session"]["mode_id"] == "professional"
+    assert state["settings"]["mode_id"] == "coding_agent"
+    assert state["current_mode"]["id"] == "coding_agent"
+    assert state["current_session"]["mode_id"] == "coding_agent"
     assert state["runtime"]["recording"] is False
     assert state["runtime"]["latest_job_id"] == ""
     assert state["runtime"]["log_count"] >= 1
@@ -111,8 +111,8 @@ def test_sidecar_save_modes_preserves_current_mode(tmp_path):
     )
     state = payload["state"]
     assert [mode["id"] for mode in state["modes"]] == ["reviewer", "coding_agent"]
-    assert state["settings"]["mode_id"] == "reviewer"
-    assert state["current_session"]["mode_id"] == "reviewer"
+    assert state["settings"]["mode_id"] == "coding_agent"
+    assert state["current_session"]["mode_id"] == "coding_agent"
     assert (tmp_path / "modes" / "001-reviewer.yaml").exists()
 
 
@@ -148,7 +148,7 @@ def test_http_api_requires_token_and_limits_request_body(tmp_path):
             headers={"X-Aura-Token": "test-token", "Origin": "https://evil.example"},
         )
         with urlopen(request, timeout=2) as response:
-            assert json.load(response)["api_version"] == 4
+            assert json.load(response)["api_version"] == 5
             assert response.headers.get("Access-Control-Allow-Origin") is None
 
         oversized = Request(
@@ -202,6 +202,49 @@ def test_sidecar_load_session_restores_turn_context(tmp_path):
     assert payload["state"]["current_session"]["id"] == session_id
     assert app.service.sessions.previous_transcripts() == ["first request", "second request"]
     assert app.service.sessions.previous_compiled_text() == "compiled second request"
+
+
+def test_merge_output_is_session_scoped_and_defaults_to_enabled(tmp_path):
+    app = local_app(tmp_path)
+
+    disabled = app.set_merge_output({"merge_output": False})
+    assert disabled["state"]["current_session"]["merge_output"] is False
+
+    app.service.current_session.add_turn(
+        raw_transcript="first session",
+        compiled_text="first result",
+        stt_provider="test-stt",
+        llm_provider="test-llm",
+    )
+    first_session_id = app.service.current_session.id
+    app.service.history.save_session(app.service.current_session)
+
+    new_session = app.new_session({"mode_id": app.service.settings.mode_id})
+    assert new_session["state"]["current_session"]["merge_output"] is True
+    assert new_session["state"]["current_session"]["turn_count"] == 0
+
+    restored = app.load_session({"session_id": first_session_id})
+    assert restored["state"]["current_session"]["merge_output"] is False
+    assert restored["state"]["current_session"]["turn_count"] == 1
+
+
+def test_session_switch_is_blocked_while_processing_job_is_active(tmp_path):
+    app = local_app(tmp_path)
+    app._create_job(
+        RecordingResult(
+            wav_path=tmp_path / "active.wav",
+            duration_seconds=1.0,
+            average_volume=100.0,
+            max_volume=500,
+        )
+    )
+
+    try:
+        app.new_session({"mode_id": app.service.settings.mode_id})
+    except RuntimeError as exc:
+        assert "仍在处理中" in str(exc)
+    else:
+        raise AssertionError("active processing must prevent session switching")
 
 
 def test_recompile_overwrites_latest_turn_without_adding_memory(tmp_path):
@@ -339,7 +382,7 @@ def test_state_masks_configured_api_key():
     assert payload["llm_api_key"] == API_KEY_MASK
 
 
-def test_saving_masked_api_key_preserves_existing_secret(tmp_path):
+def test_saving_llm_settings_discards_non_environment_secret(tmp_path):
     app = local_app(tmp_path)
     app.service.settings.llm_api_key = "existing-secret"
 
@@ -353,5 +396,23 @@ def test_saving_masked_api_key_preserves_existing_secret(tmp_path):
         }
     )
 
-    assert app.service.settings.llm_api_key == "existing-secret"
-    assert payload["state"]["settings"]["llm_api_key"] == API_KEY_MASK
+    assert app.service.settings.llm_api_key == ""
+    assert payload["state"]["settings"]["llm_api_key"] == ""
+
+
+def test_sidecar_switches_to_whisper_large_v3(tmp_path, monkeypatch):
+    app = local_app(tmp_path)
+    monkeypatch.setattr(app.service, "warm_up_transcriber_background", lambda on_status=None: None)
+
+    payload = app.save_speech_settings({"stt_provider": "whisper-large-v3"})
+
+    assert app.service.transcriber.name == "whisper-large-v3"
+    assert payload["state"]["settings"]["stt_provider"] == "whisper-large-v3"
+
+
+def test_general_theme_setting_is_saved(tmp_path):
+    app = local_app(tmp_path)
+
+    payload = app.save_general_settings({"ui_theme": "night"})
+
+    assert payload["state"]["settings"]["ui_theme"] == "night"

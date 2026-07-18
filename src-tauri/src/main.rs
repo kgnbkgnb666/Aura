@@ -13,7 +13,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -94,7 +94,7 @@ fn sidecar_health(port: u16, token: &str) -> Option<SidecarHealth> {
 
 fn sidecar_is_compatible(port: u16, token: &str) -> bool {
     sidecar_health(port, token)
-        .map(|health| health.app == "Aura" && health.api_version == 4)
+        .map(|health| health.app == "Aura" && health.api_version == 5)
         .unwrap_or(false)
 }
 
@@ -102,7 +102,7 @@ fn sidecar_belongs_to_current_process(port: u16, token: &str) -> bool {
     sidecar_health(port, token)
         .map(|health| {
             health.app == "Aura"
-                && health.api_version == 4
+                && health.api_version == 5
                 && health.parent_pid == Some(std::process::id())
         })
         .unwrap_or(false)
@@ -314,22 +314,46 @@ fn ensure_sidecar(state: tauri::State<'_, SidecarState>) -> Result<SidecarInfo, 
     Err("No compatible Aura sidecar port is available. Stop old sidecar processes on 8765-8768 and retry.".to_string())
 }
 
+fn should_hide_main_window(is_visible: bool, is_minimized: bool) -> bool {
+    is_visible && !is_minimized
+}
+
+fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        if window.is_minimized().map_err(|e| e.to_string())? {
+            window.unminimize().map_err(|e| e.to_string())?;
+        }
+        window.set_focus().map_err(|e| e.to_string())?;
+        window.emit("aura://shown", ()).map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    }
+}
+
 fn toggle_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         let is_visible = window.is_visible().map_err(|e| e.to_string())?;
-        let is_focused = window.is_focused().map_err(|e| e.to_string())?;
         let is_minimized = window.is_minimized().map_err(|e| e.to_string())?;
-        if is_visible && is_focused && !is_minimized {
+        if should_hide_main_window(is_visible, is_minimized) {
             window.hide().map_err(|e| e.to_string())
         } else {
-            window.show().map_err(|e| e.to_string())?;
-            if is_minimized {
-                window.unminimize().map_err(|e| e.to_string())?;
-            }
-            window.set_focus().map_err(|e| e.to_string())
+            show_main_window(app)
         }
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_hide_main_window;
+
+    #[test]
+    fn tray_toggle_hides_a_visible_non_minimized_window() {
+        assert!(should_hide_main_window(true, false));
+        assert!(!should_hide_main_window(false, false));
+        assert!(!should_hide_main_window(true, true));
     }
 }
 
@@ -369,7 +393,7 @@ fn main() {
                 app.global_shortcut()
                     .on_shortcut("ctrl+shift+space", |app, _shortcut, event| {
                         if event.state == ShortcutState::Pressed {
-                            let _ = toggle_main_window(app);
+                            let _ = show_main_window(app);
                         }
                     })
             {

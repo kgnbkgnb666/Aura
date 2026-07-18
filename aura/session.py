@@ -8,7 +8,7 @@ class SessionManager:
         self.current = self.new_session(default_mode_id)
 
     def new_session(self, mode_id: str | None = None) -> Session:
-        self.current = Session(id=new_id(), mode_id=mode_id or "professional")
+        self.current = Session(id=new_id(), mode_id=mode_id or "coding_agent")
         return self.current
 
     def set_mode(self, mode_id: str) -> None:

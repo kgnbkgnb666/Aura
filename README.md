@@ -102,12 +102,12 @@ Aura 理解任务意图并匹配演示文稿 Skill
 - 🔗 **记住会话上下文**：连续补充想法，不必每次从头解释。
 - ⚡ **流式生成结果**：转写完成立即可见，整理内容持续出现。
 - 📋 **自动复制**：整理完成即可粘贴到任何 Agent 工具。
-- 🎯 **多种表达模式**：简单任务保持直接，复杂任务自动变得专业完整。
+- 🎯 **全能自适应模式**：简单任务保持直接，复杂任务自动补齐边界、交付与验收要求。
 - 🌍 **兼容主流模型服务**：支持 DeepSeek、OpenAI-compatible、Ollama、vLLM 等接口。
 
 ## 🛡️ 本地语音识别：隐私、自由、免费
 
-Aura 使用 SenseVoice-Small 在本地完成语音识别。
+Aura 支持在设置的“语音”页面选择 SenseVoice Small 或 Whisper Large V3，并在本地完成语音识别。
 
 - 🏠 **语音留在本机**：原始声音不需要上传到在线 STT 服务。
 - 🔐 **保护真实表达**：会议想法、代码需求和未公开创意都可以放心说。
@@ -122,11 +122,10 @@ Aura 是一个真正为开发工作流设计的桌面伙伴。
 
 | 快捷键 | 动作 |
 | --- | --- |
-| `Ctrl + Shift + Space` | ⚡ 在任何位置唤起 / 隐藏 Aura |
+| `Ctrl + Shift + Space` | ⚡ 在任何位置唤起并聚焦 Aura |
 | 按住 `Space` | 🎙️ 开始说话，松开后处理 |
 | `Ctrl + N` | 📝 开始一个新会话 |
-| `Ctrl + ↑` / `Ctrl + ↓` | 🎯 快速切换整理模式 |
-| `Esc` | 🌙 隐藏窗口，回到当前工作 |
+| `Esc` | 🌙 隐藏 Aura，回到当前工作 |
 
 灵感出现时，按下快捷键就说。几秒后，一段清晰的任务已经可以交给 Agent。
 
@@ -166,11 +165,26 @@ npm ci
 npm run tauri:dev
 ```
 
-第一次启动时，Aura 会准备本地语音模型。完成后，按住 `Space` 说出你的第一个想法。
+第一次启动时，Aura 会准备当前选择的本地语音模型。完成后，按住 `Space` 说出你的第一个想法。
+
+### 使用 Whisper Large V3
+
+1. 确认已运行 `python -m pip install -r requirements.txt`，其中包含 `faster-whisper`。
+2. 打开 Aura 的“设置 → 语音”，选择 `Whisper Large V3（高精度）` 后保存。
+3. Aura 会自动把约 3 GB 的模型下载到 `models/huggingface`，下载完成后自动加载。
+
+也可以在项目根目录提前下载，避免首次启动时等待：
+
+```powershell
+# faster-whisper 使用的官方转换模型
+hf download Systran/faster-whisper-large-v3 --cache-dir models/huggingface
+```
+
+Whisper Large V3 会自动使用可用的 NVIDIA GPU；没有兼容 GPU 时使用 CPU `int8`，可以正常运行，但识别速度会明显变慢。
 
 ### 3️⃣ 推荐：用环境变量配置 API Key
 
-Aura 支持通过 `AURA_LLM_API_KEY` 读取密钥。环境变量的优先级高于界面配置，并且不会被 Aura 写入项目配置文件。
+Aura 只通过 `AURA_LLM_API_KEY` 读取密钥，绝不会把密钥写入 `config.local.json`。
 
 只在当前 PowerShell 会话中使用：
 

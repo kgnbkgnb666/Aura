@@ -30,11 +30,10 @@ The app is designed for Codex, Claude Code, Cursor, ChatGPT, and other agentic t
 
 ## Shortcuts
 
-- `Ctrl+Shift+Space`: show or hide Aura.
+- `Ctrl+Shift+Space`: show and focus Aura.
 - `Space`: hold to record when the main window is focused.
 - `Ctrl+N`: new session.
-- `Ctrl+Up` / `Ctrl+Down`: switch mode.
-- `Esc`: hide window.
+- `Esc`: hide Aura.
 
 ## UX Requirements
 
@@ -66,13 +65,13 @@ are project-local, ignored by Git, and excluded from package resource manifests.
 environment variables as an API credential fallback.
 
 Older `%APPDATA%/Aura/config.json` and history files are copied into the project-local locations on
-first launch after an upgrade. Legacy `concise` mode selections are mapped to `coding_agent`.
+first launch after an upgrade. Legacy `concise` and `professional` mode selections are mapped to
+the unified `coding_agent` mode.
 
 ## Prompt Modes
 
-- `coding_agent` / 标准模式: merged concise + standard behavior with adaptive output depth.
-- `professional` / 专业模式: detailed scope, boundary, risk, execution, and verification guidance;
-  this is the default for new configurations.
+- `coding_agent` / 标准模式: the single built-in mode. It adapts output depth to the task and
+  combines clarity, execution boundaries, risk awareness, Skill matching, and verification.
 
 ## Verification
 

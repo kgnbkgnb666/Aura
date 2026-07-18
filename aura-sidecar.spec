@@ -17,10 +17,12 @@ block_cipher = None
 # Collect all FunASR submodules to ensure @tables.register decorators run
 funasr_hidden_imports = collect_submodules('funasr')
 modelscope_hidden_imports = collect_submodules('modelscope')
+faster_whisper_hidden_imports = collect_submodules('faster_whisper')
 
 # Collect data files
 funasr_datas = collect_data_files('funasr')
 modelscope_datas = collect_data_files('modelscope')
+faster_whisper_datas = collect_data_files('faster_whisper')
 
 # Critical FunASR modules that must be explicitly included
 critical_imports = [
@@ -62,8 +64,8 @@ a = Analysis(
     ['aura/sidecar_entry.py'],
     pathex=[],
     binaries=[],
-    datas=funasr_datas + modelscope_datas,
-    hiddenimports=funasr_hidden_imports + modelscope_hidden_imports + critical_imports,
+    datas=funasr_datas + modelscope_datas + faster_whisper_datas,
+    hiddenimports=funasr_hidden_imports + modelscope_hidden_imports + faster_whisper_hidden_imports + critical_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -21,10 +21,11 @@ export type Settings = {
   input_device_index: number | null;
   stt_provider: string;
   model_cache_dir: string | null;
+  ui_theme: "morning" | "night";
   llm_provider: string;
   llm_base_url: string;
   llm_api_key: string;
-  llm_api_key_source?: "environment" | "configuration";
+  llm_api_key_source?: "environment" | "unset";
   llm_model: string;
   llm_thinking_enabled: boolean;
   llm_temperature: number;
@@ -78,6 +79,7 @@ export type AppState = {
     created_at: string;
     updated_at: string;
     turn_count: number;
+    merge_output: boolean;
   };
   history: Array<{
     id: string;
@@ -88,6 +90,7 @@ export type AppState = {
     last_transcript: string;
     last_compiled: string;
     turn_count: number;
+    merge_output: boolean;
   }>;
   skills: Skill[];
   service: {
@@ -146,7 +149,7 @@ export async function ensureSidecar(): Promise<void> {
     authToken = "";
   }
   const health = await request<{ ok: boolean; app?: string; api_version?: number }>("/api/health");
-  if (!health.ok || health.app !== "Aura" || health.api_version !== 4) {
+  if (!health.ok || health.app !== "Aura" || health.api_version !== 5) {
     throw new Error("Aura sidecar protocol mismatch. Stop old sidecar processes and restart Aura.");
   }
 }
@@ -193,6 +196,11 @@ export const api = {
         body: JSON.stringify({ session_id: sessionId })
       }
     ),
+  setMergeOutput: (mergeOutput: boolean) =>
+    request<{ state: AppState }>("/api/session/merge-output", {
+      method: "POST",
+      body: JSON.stringify({ merge_output: mergeOutput })
+    }),
   setMode: (modeId: string) =>
     request<{ state: AppState }>("/api/mode", {
       method: "POST",

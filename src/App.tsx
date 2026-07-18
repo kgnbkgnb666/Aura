@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   ArrowLeft,
   Check,
   Clipboard,
   Cpu,
+  FileCheck2,
   GripVertical,
+  GitMerge,
   History,
   Keyboard,
   Mic,
-  Mic2,
+  Moon,
   Pencil,
   Play,
   Plus,
   RefreshCcw,
   Settings as SettingsIcon,
   SlidersHorizontal,
-  Square,
+  Sparkles,
+  Sun,
   Terminal,
   Trash2
 } from "lucide-react";
@@ -23,10 +27,23 @@ import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, autostart, 
 import deepseekLogo from "./assets/deepseek-logo.svg";
 
 type Tab = "main" | "general" | "speech" | "llm" | "modes" | "skills" | "shortcuts" | "logs" | "history";
+type ThemeId = "morning" | "night";
+
+function storedTheme(): ThemeId {
+  return window.localStorage.getItem("aura-ui-theme") === "night" ? "night" : "morning";
+}
+
+function applyTheme(theme: ThemeId) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme === "night" ? "dark" : "light";
+  window.localStorage.setItem("aura-ui-theme", theme);
+}
+
+applyTheme(storedTheme());
 
 const emptySettings: Settings = {
   app_name: "Aura",
-  mode_id: "professional",
+  mode_id: "coding_agent",
   auto_copy: true,
   save_history: true,
   auto_launch: false,
@@ -36,6 +53,7 @@ const emptySettings: Settings = {
   input_device_index: null,
   stt_provider: "sensevoice-small",
   model_cache_dir: "",
+  ui_theme: storedTheme(),
   llm_provider: "deepseek",
   llm_base_url: "https://api.deepseek.com",
   llm_api_key: "",
@@ -68,7 +86,6 @@ function stateSkills(state: AppState) {
 }
 
 const deepseekModels = ["deepseek-v4-flash", "deepseek-v4-pro"];
-const apiKeyMask = "********";
 
 function isDeepSeekEndpoint(value: string) {
   const normalized = value.trim().toLowerCase().replace(/\/+$/, "");
@@ -85,7 +102,6 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Settings>(emptySettings);
-  const [deepseekApiKeyDraft, setDeepseekApiKeyDraft] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [micTestCountdown, setMicTestCountdown] = useState(0);
@@ -108,6 +124,10 @@ export default function App() {
   const selectedMode = state?.current_mode;
 
   useEffect(() => {
+    applyTheme(draft.ui_theme || "morning");
+  }, [draft.ui_theme]);
+
+  useEffect(() => {
     if (state || error) return;
     const startedAt = Date.now();
     const updateElapsed = () => {
@@ -117,13 +137,6 @@ export default function App() {
     const id = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(id);
   }, [error, state]);
-
-  useEffect(() => {
-    const draftIsDeepSeek = draft.llm_provider === "deepseek" || isDeepSeekEndpoint(draft.llm_base_url);
-    if (draftIsDeepSeek && draft.llm_api_key !== deepseekApiKeyDraft) {
-      setDeepseekApiKeyDraft(draft.llm_api_key);
-    }
-  }, [deepseekApiKeyDraft, draft.llm_api_key, draft.llm_base_url, draft.llm_provider]);
 
   const refresh = useCallback(async () => {
     const next = await api.state();
@@ -318,7 +331,6 @@ export default function App() {
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
       await refresh().catch(() => undefined);
-    } finally {
       setBusy(false);
     }
   }, [refresh]);
@@ -378,6 +390,7 @@ export default function App() {
 
   const keyboardContextRef = useRef({
     activeTab,
+    textEditing: transcriptEditing || compiledEditing,
     startRecording,
     stopRecording,
     newSession,
@@ -385,6 +398,7 @@ export default function App() {
   });
   keyboardContextRef.current = {
     activeTab,
+    textEditing: transcriptEditing || compiledEditing,
     startRecording,
     stopRecording,
     newSession,
@@ -392,12 +406,28 @@ export default function App() {
   };
 
   useEffect(() => {
+    let dispose: (() => void) | undefined;
+    void listen("aura://shown", () => {
+      keyboardContextRef.current.textEditing = false;
+      setTranscriptEditing(false);
+      setCompiledEditing(false);
+      window.requestAnimationFrame(() => {
+        const focused = document.activeElement;
+        if (focused instanceof HTMLElement) focused.blur();
+        window.focus();
+      });
+    }).then((unlisten) => {
+      dispose = unlisten;
+    });
+    return () => dispose?.();
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const context = keyboardContextRef.current;
-      const editing = ["textarea", "input"].includes(
-        (document.activeElement?.tagName || "").toLowerCase()
-      );
-      if (event.code === "Space" && !event.repeat && context.activeTab === "main" && !editing) {
+      const isPlainSpace =
+        event.code === "Space" && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey;
+      if (isPlainSpace && !event.repeat && context.activeTab === "main" && !context.textEditing) {
         event.preventDefault();
         void context.startRecording();
       }
@@ -423,10 +453,7 @@ export default function App() {
     };
     const onKeyUp = (event: KeyboardEvent) => {
       const context = keyboardContextRef.current;
-      const editing = ["textarea", "input"].includes(
-        (document.activeElement?.tagName || "").toLowerCase()
-      );
-      if (event.code === "Space" && context.activeTab === "main" && !editing) {
+      if (event.code === "Space" && context.activeTab === "main" && !context.textEditing) {
         event.preventDefault();
         void context.stopRecording();
       }
@@ -466,6 +493,7 @@ export default function App() {
   }
 
   async function newSession() {
+    if (busy || state?.runtime.recording || activeJobId) return;
     const modeId = state?.current_mode.id || draft.mode_id;
     const payload = await api.newSession(modeId);
     setState(payload.state);
@@ -517,12 +545,24 @@ export default function App() {
   async function saveSpeech() {
     const payload = await api.saveSpeech(draft);
     setState(payload.state);
+    setDraft(payload.state.settings);
   }
 
   async function saveLlm() {
     const payload = await api.saveLlm(draft);
     setState(payload.state);
     setDraft(payload.state.settings);
+  }
+
+  async function toggleMergeOutput() {
+    if (!state || busy || state.runtime.recording || activeJobId) return;
+    try {
+      setError("");
+      const payload = await api.setMergeOutput(!state.current_session.merge_output);
+      setState(payload.state);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    }
   }
 
   async function saveModes() {
@@ -647,7 +687,7 @@ export default function App() {
   if (!state) {
     return (
       <main className="boot">
-        <div className="boot-mark"><Cpu size={24} /></div>
+        <div className="boot-mark"><Sparkles size={28} /></div>
         <div className="boot-copy">
           <strong>{error ? "启动失败" : "正在启动 Aura"}</strong>
           <span>{error || bootStatus}</span>
@@ -682,10 +722,6 @@ export default function App() {
               <ArrowLeft size={16} />
               <span>返回</span>
             </button>
-            <div>
-              <strong>设置</strong>
-              <span>{selectedMode?.name || "Mode"}</span>
-            </div>
           </header>
           <div className="settings-content">
             <nav className="settings-tabs">
@@ -746,8 +782,6 @@ export default function App() {
             {activeTab === "llm" ? (
               <LlmSettings
                 draft={draft}
-                deepseekApiKey={deepseekApiKeyDraft}
-                onDeepseekApiKeyChange={setDeepseekApiKeyDraft}
                 onDraft={setDraft}
                 onSaveLlm={saveLlm}
               />
@@ -778,14 +812,7 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <Mic2 size={22} />
-          <div>
-            <strong>Aura</strong>
-            <span>{selectedMode?.name || "Mode"}</span>
-          </div>
-        </div>
-        <select value={selectedMode?.id || ""} onChange={(event) => setMode(event.target.value)}>
+        <select aria-label="当前模式" value={selectedMode?.id || ""} onChange={(event) => setMode(event.target.value)}>
           {state.modes.map((mode) => (
             <option key={mode.id} value={mode.id}>
               {mode.name}
@@ -823,7 +850,7 @@ export default function App() {
             <i style={{ width: `${volumePercent}%` }} />
           </div>
         </div>
-        <button title="新会话" onClick={newSession}>
+        <button title="新会话" disabled={busy || state.runtime.recording || Boolean(activeJobId)} onClick={newSession}>
           <RefreshCcw size={16} />
         </button>
         <button title="设置" onClick={() => openSettings("general")}>
@@ -835,7 +862,7 @@ export default function App() {
         <div className="editor-column">
           <div className="text-pane">
             <div className="pane-head">
-              <span>原始转录</span>
+              <span className="pane-title"><Mic size={14} />原始转录</span>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 {state.runtime.recording ? <Mic size={16} /> : null}
                 <button
@@ -858,9 +885,19 @@ export default function App() {
           </div>
           <div className={`text-pane result-pane ${copied ? "copied" : ""}`}>
             <div className="pane-head">
-              <span>AI 编译结果</span>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <button
+	              <span className="pane-title"><FileCheck2 size={14} />AI 编译结果</span>
+	              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+	                <button
+	                  className={`merge-output-button ${state.current_session.merge_output ? "active" : ""}`}
+	                  title={state.current_session.merge_output ? "已开启：合并本会话的全部需求" : "已关闭：只输出本次新需求"}
+	                  aria-pressed={state.current_session.merge_output}
+	                  disabled={busy || state.runtime.recording || Boolean(activeJobId)}
+	                  onClick={() => void toggleMergeOutput()}
+	                >
+	                  <GitMerge size={14} />
+	                  <span>合并需求输出</span>
+	                </button>
+	                <button
                   title={compiledEditing ? "完成编辑" : "编辑 AI 编译结果"}
                   disabled={busy}
                   onClick={() => compiledEditing ? void finishEditing("compiled") : setCompiledEditing(true)}
@@ -885,14 +922,6 @@ export default function App() {
         </div>
 
       </section>
-
-      <footer>
-        <button className={`record-button ${state.runtime.recording ? "active" : ""}`} onMouseDown={startRecording} onMouseUp={stopRecording} disabled={busy || !state.service.transcriber_ready}>
-          {state.runtime.recording ? <Square size={17} /> : <Play size={17} />}
-          <span>{!state.service.transcriber_ready ? "模型准备中" : busy ? "处理中" : state.runtime.recording ? "松开完成" : "按住录音"}</span>
-        </button>
-        <span>{copied ? "已自动复制" : `${state.current_session.turn_count} turns`}</span>
-      </footer>
     </main>
   );
 }
@@ -915,6 +944,24 @@ function SpeechSettings(props: {
   const { draft, devices, busy, onDraft } = props;
   return (
     <div className="settings-body">
+      <label>
+        <span>语音识别模型</span>
+        <select
+          value={draft.stt_provider}
+          onChange={(event) => onDraft({ ...draft, stt_provider: event.target.value })}
+        >
+          <option value="sensevoice-small">SenseVoice Small（轻量快速）</option>
+          <option value="whisper-large-v3">Whisper Large V3（高精度）</option>
+        </select>
+      </label>
+      <div className="model-note">
+        <strong>{draft.stt_provider === "whisper-large-v3" ? "Whisper Large V3" : "SenseVoice Small"}</strong>
+        <span>
+          {draft.stt_provider === "whisper-large-v3"
+            ? "首次保存后自动下载约 3 GB 模型；支持 NVIDIA GPU，CPU 也可运行但速度较慢。"
+            : "首次使用时自动下载，体积较小，适合中文实时输入。"}
+        </span>
+      </div>
       <label>
         <span>麦克风</span>
         <select
@@ -1326,8 +1373,36 @@ function GeneralSettings(props: {
     onStateChange(payload.state);
   }
 
+  async function setTheme(theme: ThemeId) {
+    applyTheme(theme);
+    onDraft({ ...draft, ui_theme: theme });
+    const payload = await api.saveGeneral({ ui_theme: theme });
+    onStateChange(payload.state);
+  }
+
   return (
     <div className="settings-body">
+      <div className="theme-setting">
+        <span>界面风格</span>
+        <div className="theme-switch" role="group" aria-label="界面风格">
+          <button
+            className={draft.ui_theme === "morning" ? "active" : ""}
+            aria-pressed={draft.ui_theme === "morning"}
+            onClick={() => void setTheme("morning")}
+          >
+            <Sun size={16} />
+            <span>晨光</span>
+          </button>
+          <button
+            className={draft.ui_theme === "night" ? "active" : ""}
+            aria-pressed={draft.ui_theme === "night"}
+            onClick={() => void setTheme("night")}
+          >
+            <Moon size={16} />
+            <span>静夜</span>
+          </button>
+        </div>
+      </div>
       <div className="checks">
         <label>
           <input type="checkbox" checked={draft.auto_copy} onChange={(event) => setAutoCopy(event.target.checked)} />
@@ -1348,54 +1423,33 @@ function GeneralSettings(props: {
 
 function LlmSettings(props: {
   draft: Settings;
-  deepseekApiKey: string;
-  onDeepseekApiKeyChange: (value: string) => void;
   onDraft: (settings: Settings) => void;
   onSaveLlm: () => void;
 }) {
-  const { draft, deepseekApiKey, onDeepseekApiKeyChange, onDraft } = props;
+  const { draft, onDraft } = props;
   const isDeepSeek = draft.llm_provider === "deepseek" || isDeepSeekEndpoint(draft.llm_base_url);
   const isCustom = !isDeepSeek;
-  const deepseekApiKeyCache = useRef(deepseekApiKey);
   const deepseekModel = deepseekModels.includes(draft.llm_model)
     ? draft.llm_model
     : "deepseek-v4-flash";
 
-  useEffect(() => {
-    if (!isCustom) {
-      deepseekApiKeyCache.current = draft.llm_api_key;
-    }
-  }, [draft.llm_api_key, isCustom]);
-
-  useEffect(() => {
-    if (deepseekApiKey !== "") {
-      deepseekApiKeyCache.current = deepseekApiKey;
-    }
-  }, [deepseekApiKey]);
-
   function useDeepSeek() {
-    const keepKey = isDeepSeekEndpoint(draft.llm_base_url);
-    const cachedKey = deepseekApiKeyCache.current;
     onDraft({
       ...draft,
       llm_provider: "deepseek",
       llm_base_url: "https://api.deepseek.com",
       llm_model: "deepseek-v4-flash",
-      llm_api_key: keepKey ? draft.llm_api_key : cachedKey,
       llm_thinking_enabled: false
     });
   }
 
   function useCustom() {
     if (isCustom) return;
-    deepseekApiKeyCache.current = draft.llm_api_key;
-    onDeepseekApiKeyChange(draft.llm_api_key);
     onDraft({
       ...draft,
       llm_provider: "openai_compatible",
       llm_base_url: "",
       llm_model: "",
-      llm_api_key: "",
       llm_thinking_enabled: false
     });
   }
@@ -1444,21 +1498,13 @@ function LlmSettings(props: {
         )}
       </label>
       <label>
-        <span>{isCustom ? "API Key（可选）" : "DeepSeek API Key"}</span>
+        <span>API Key 环境变量</span>
         <input
-          type="password"
-          value={draft.llm_api_key}
-          onChange={(event) => {
-            const value = event.target.value;
-            if (!isCustom) onDeepseekApiKeyChange(value);
-            onDraft({ ...draft, llm_api_key: value });
-          }}
-          onFocus={(event) => {
-            if (draft.llm_api_key === apiKeyMask) event.currentTarget.select();
-          }}
-          placeholder={isCustom ? "无鉴权的本地服务可留空" : "仅保存在本地 config.local.json"}
+          readOnly
+          value={draft.llm_api_key ? "AURA_LLM_API_KEY 已设置" : "AURA_LLM_API_KEY 未设置"}
         />
       </label>
+      <p className="setting-hint">Aura 只从系统环境变量 AURA_LLM_API_KEY 读取密钥，不会写入配置文件。</p>
       {!isCustom ? (
         <label className="thinking-toggle">
           <input
@@ -1491,10 +1537,9 @@ function LlmSettings(props: {
 
 function ShortcutsPanel() {
   const shortcuts = [
-    ["Ctrl+Shift+Space", "打开或隐藏 Aura"],
-    ["Space", "模型就绪且主界面聚焦时按住录音，松开后转录"],
+    ["Ctrl+Shift+Space", "唤起并聚焦 Aura"],
+    ["Space", "Aura 主界面聚焦时按住录音，松开后转录"],
     ["Ctrl+N", "新建会话"],
-    ["Ctrl+Up / Ctrl+Down", "切换模式"],
     ["Esc", "隐藏 Aura"]
   ];
 

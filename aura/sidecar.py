@@ -102,7 +102,7 @@ def json_response(payload: Any, status: int = 200) -> bytes:
 def settings_payload(settings: Settings) -> JsonDict:
     data = asdict(settings)
     data["llm_api_key"] = API_KEY_MASK if settings.llm_api_key else ""
-    data["llm_api_key_source"] = "environment" if environment_llm_api_key() else "configuration"
+    data["llm_api_key_source"] = "environment" if environment_llm_api_key() else "unset"
     if data.get("history_path"):
         data["history_path"] = str(data["history_path"])
     if data.get("model_cache_dir"):
@@ -181,6 +181,7 @@ def session_payload(session: Session) -> JsonDict:
         "id": session.id,
         "mode_id": session.mode_id,
         "title": session.title,
+        "merge_output": session.merge_output,
         "created_at": session.created_at.isoformat(),
         "updated_at": session.updated_at.isoformat(),
         "turn_count": len(session.turns),
@@ -278,6 +279,7 @@ class AuraSidecar:
         return {"devices": devices}
 
     def new_session(self, payload: JsonDict) -> JsonDict:
+        self._ensure_session_switch_allowed()
         with self._lock:
             session = self.service.new_session(payload.get("mode_id") or self.service.settings.mode_id)
             self.latest_status = "新会话"
@@ -285,6 +287,7 @@ class AuraSidecar:
             return {"session": session_payload(session), "state": self.state()}
 
     def load_session(self, payload: JsonDict) -> JsonDict:
+        self._ensure_session_switch_allowed()
         session_id = str(payload.get("session_id") or "")
         if not session_id:
             raise ValueError("session_id is required")
@@ -294,6 +297,23 @@ class AuraSidecar:
             self.latest_status = f"已切换历史: {session.title}"
             self.logs.info("session", f"Loaded session: {session.id}")
             return {**session_detail_payload(session), "state": self.state()}
+
+    def _ensure_session_switch_allowed(self) -> None:
+        if self.recorder is not None:
+            raise RuntimeError("录音期间不能切换会话。")
+        latest_job_id = self.jobs.latest_job_id
+        if latest_job_id and not self.jobs.get(latest_job_id).get("done", False):
+            raise RuntimeError("当前需求仍在处理中，请完成后再切换会话。")
+
+    def set_merge_output(self, payload: JsonDict) -> JsonDict:
+        enabled = payload.get("merge_output")
+        if not isinstance(enabled, bool):
+            raise ValueError("merge_output must be a boolean")
+        with self._lock:
+            self.service.set_merge_output(enabled)
+            self.latest_status = "合并需求输出已开启" if enabled else "仅输出本次需求"
+            self.logs.info("session", f"Merge output: {enabled}")
+            return {"state": self.state()}
 
     def set_mode(self, payload: JsonDict) -> JsonDict:
         mode_id = str(payload.get("mode_id") or "")
@@ -333,7 +353,7 @@ class AuraSidecar:
             available_ids = {mode.id for mode in modes}
             preferred_id = self.service.settings.mode_id
             if preferred_id not in available_ids:
-                preferred_id = "professional" if "professional" in available_ids else modes[0].id
+                preferred_id = "coding_agent" if "coding_agent" in available_ids else modes[0].id
             default_mode = next(mode for mode in modes if mode.id == preferred_id)
             self.service.settings.mode_id = default_mode.id
             self.service.sessions.set_mode(default_mode.id)
@@ -400,6 +420,8 @@ class AuraSidecar:
             settings.auto_copy = bool(payload.get("auto_copy", settings.auto_copy))
             settings.save_history = bool(payload.get("save_history", settings.save_history))
             settings.auto_launch = bool(payload.get("auto_launch", settings.auto_launch))
+            theme = str(payload.get("ui_theme") or settings.ui_theme)
+            settings.ui_theme = theme if theme in {"morning", "night"} else "morning"
             self.settings_store.save(settings)
             self.latest_status = "设置已保存"
             self.logs.info("settings", "General settings saved")
@@ -409,12 +431,18 @@ class AuraSidecar:
         with self._lock:
             settings = self.service.settings
             previous_cache_dir = settings.model_cache_dir
+            previous_provider = settings.stt_provider
             settings.input_device_index = payload.get("input_device_index")
             cache_dir = str(payload.get("model_cache_dir") or "").strip()
             if cache_dir:
                 settings.model_cache_dir = Path(cache_dir)
-            settings.stt_provider = "sensevoice-small"
-            if settings.model_cache_dir != previous_cache_dir:
+            provider = str(payload.get("stt_provider") or settings.stt_provider)
+            settings.stt_provider = (
+                provider
+                if provider in {"sensevoice-small", "whisper-large-v3"}
+                else "sensevoice-small"
+            )
+            if settings.model_cache_dir != previous_cache_dir or settings.stt_provider != previous_provider:
                 self.service.transcriber = self.service._build_transcriber()
                 self.service.warm_up_transcriber_background(on_status=self.set_status)
             self.settings_store.save(settings)
@@ -428,13 +456,7 @@ class AuraSidecar:
             settings.llm_provider = str(payload.get("llm_provider") or settings.llm_provider)
             settings.llm_base_url = str(payload.get("llm_base_url") or "").strip()
             settings.llm_model = str(payload.get("llm_model") or "").strip()
-            environment_key = environment_llm_api_key()
-            if environment_key:
-                settings.llm_api_key = environment_key
-            else:
-                submitted_api_key = str(payload.get("llm_api_key") or "")
-                if submitted_api_key != API_KEY_MASK:
-                    settings.llm_api_key = submitted_api_key
+            settings.llm_api_key = environment_llm_api_key()
             settings.llm_thinking_enabled = bool(
                 payload.get("llm_thinking_enabled", settings.llm_thinking_enabled)
             )
@@ -689,7 +711,7 @@ def build_handler(
                     self._send({
                         "ok": True,
                         "app": "Aura",
-                        "api_version": 4,
+                        "api_version": 5,
                         "parent_pid": parent_pid,
                     })
                 elif path == "/api/state":
@@ -718,6 +740,7 @@ def build_handler(
                 routes = {
                     "/api/session/new": app.new_session,
                     "/api/session/load": app.load_session,
+                    "/api/session/merge-output": app.set_merge_output,
                     "/api/mode": app.set_mode,
                     "/api/modes": app.save_modes,
                     "/api/skills/scan": app.scan_skills,

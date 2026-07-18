@@ -10,7 +10,7 @@ from .config import LOCAL_DATA_DIR_NAME, project_root
 from .models import Mode
 
 
-LEGACY_MODE_IDS = {"concise": "coding_agent"}
+LEGACY_MODE_IDS = {"concise": "coding_agent", "professional": "coding_agent"}
 
 
 def _safe_slug(value: str) -> str:

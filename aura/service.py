@@ -12,7 +12,7 @@ from .history import HistoryStore
 from .models import CompileRequest, Mode, Settings, Session
 from .modes import ModeRegistry
 from .providers.llm import OpenAICompatibleClient, RuleBasedCompiler
-from .providers.stt import SenseVoiceSmallTranscriber
+from .providers.stt import SenseVoiceSmallTranscriber, WhisperLargeV3Transcriber
 from .session import SessionManager
 
 
@@ -66,6 +66,8 @@ class AuraService:
         return RuleBasedCompiler()
 
     def _build_transcriber(self):
+        if self.settings.stt_provider == "whisper-large-v3":
+            return WhisperLargeV3Transcriber(cache_dir=self.settings.model_cache_dir)
         self.settings.stt_provider = "sensevoice-small"
         return SenseVoiceSmallTranscriber(cache_dir=self.settings.model_cache_dir)
 
@@ -85,6 +87,11 @@ class AuraService:
         resolved_mode_id = self.modes.resolve_id(mode_id)
         self.settings.mode_id = resolved_mode_id
         self.sessions.set_mode(resolved_mode_id)
+
+    def set_merge_output(self, enabled: bool) -> None:
+        self.current_session.merge_output = enabled
+        if self.settings.save_history and self.current_session.turns:
+            self.history.save_session(self.current_session)
 
     def warm_up_transcriber(self, on_status: TextCallback | None = None) -> None:
         if self.transcriber.is_ready:
@@ -125,6 +132,7 @@ class AuraService:
             previous_compiled_text=self.sessions.previous_compiled_text(),
             previous_transcripts=self.sessions.previous_transcripts(),
             skills=self.settings.skills,
+            merge_output=self.current_session.merge_output,
         )
         parts: list[str] = []
         for chunk in self.compiler.stream_compile(request):
@@ -147,12 +155,16 @@ class AuraService:
         previous_transcripts = self.sessions.previous_transcripts()
         if self.current_session.turns:
             previous_transcripts = previous_transcripts[:-1]
+        previous_compiled_text = ""
+        if len(self.current_session.turns) > 1:
+            previous_compiled_text = self.current_session.turns[-2].compiled_text
         request = CompileRequest(
             mode=self.current_mode,
             current_transcript=transcript,
-            previous_compiled_text=self.sessions.previous_compiled_text(),
+            previous_compiled_text=previous_compiled_text,
             previous_transcripts=previous_transcripts,
             skills=self.settings.skills,
+            merge_output=self.current_session.merge_output,
         )
         parts: list[str] = []
         for chunk in self.compiler.stream_compile(request):

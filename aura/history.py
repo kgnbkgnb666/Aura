@@ -32,11 +32,17 @@ class HistoryStore:
                     id text primary key,
                     title text,
                     mode_id text,
+                    merge_output integer not null default 1,
                     created_at text,
                     updated_at text
                 )
                 """
             )
+            columns = {row[1] for row in conn.execute("pragma table_info(sessions)")}
+            if "merge_output" not in columns:
+                conn.execute(
+                    "alter table sessions add column merge_output integer not null default 1"
+                )
             conn.execute(
                 """
                 create table if not exists turns(
@@ -57,17 +63,19 @@ class HistoryStore:
         with self._connect() as conn:
             conn.execute(
                 """
-                insert into sessions(id, title, mode_id, created_at, updated_at)
-                values(?, ?, ?, ?, ?)
+                insert into sessions(id, title, mode_id, merge_output, created_at, updated_at)
+                values(?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     title=excluded.title,
                     mode_id=excluded.mode_id,
+                    merge_output=excluded.merge_output,
                     updated_at=excluded.updated_at
                 """,
                 (
                     session.id,
                     session.title,
                     session.mode_id,
+                    int(session.merge_output),
                     _dt(session.created_at),
                     _dt(session.updated_at),
                 ),
@@ -111,7 +119,7 @@ class HistoryStore:
             if owns_connection:
                 conn.close()
 
-    def recent_sessions(self, limit: int = 50) -> list[dict[str, str]]:
+    def recent_sessions(self, limit: int = 50) -> list[dict[str, object]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -121,6 +129,7 @@ class HistoryStore:
                     sessions.mode_id,
                     sessions.created_at,
                     sessions.updated_at,
+                    sessions.merge_output,
                     coalesce(latest.raw_transcript, ''),
                     coalesce(latest.compiled_text, ''),
                     coalesce(counts.turn_count, 0)
@@ -149,9 +158,10 @@ class HistoryStore:
                 "mode_id": row[2],
                 "created_at": row[3],
                 "updated_at": row[4],
-                "last_transcript": row[5],
-                "last_compiled": row[6],
-                "turn_count": row[7],
+                "merge_output": bool(row[5]),
+                "last_transcript": row[6],
+                "last_compiled": row[7],
+                "turn_count": row[8],
             }
             for row in rows
         ]
@@ -160,7 +170,7 @@ class HistoryStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                select id, title, mode_id, created_at, updated_at
+                select id, title, mode_id, merge_output, created_at, updated_at
                 from sessions
                 where id = ?
                 """,
@@ -183,8 +193,9 @@ class HistoryStore:
             id=row[0],
             title=row[1],
             mode_id=row[2],
-            created_at=_parse_dt(row[3]),
-            updated_at=_parse_dt(row[4]),
+            merge_output=bool(row[3]),
+            created_at=_parse_dt(row[4]),
+            updated_at=_parse_dt(row[5]),
         )
         session.turns = [
             Turn(
