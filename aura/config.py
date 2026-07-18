@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,9 @@ def app_data_dir(app_name: str = "Aura") -> Path:
 
 
 def project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        # PyInstaller bundle: project root is the exe directory
+        return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
 
@@ -25,7 +29,18 @@ class SettingsStore:
     def __init__(self, path: Path | None = None) -> None:
         self.base_dir = app_data_dir()
         self.path = path or self.base_dir / "config.json"
-        self.legacy_path = app_data_dir("AgentVoice") / "config.json"
+        # Removed legacy AgentVoice migration to prevent data leakage
+
+    def clear_all_data(self) -> bool:
+        """Delete all user data including config and history. Returns True if successful."""
+        try:
+            if self.base_dir.exists():
+                shutil.rmtree(self.base_dir)
+            return True
+        except Exception as e:
+            import logging
+            logging.getLogger("aura").error(f"Failed to clear user data: {e}")
+            return False
 
     def load(self) -> Settings:
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -33,16 +48,13 @@ class SettingsStore:
         settings.history_path = self.base_dir / "history.sqlite"
         settings.model_cache_dir = project_root() / "models"
         env_api_key = os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
-        source_path = self.path
-        if not source_path.exists() and self.legacy_path.exists():
-            source_path = self.legacy_path
 
-        if not source_path.exists():
+        if not self.path.exists():
             self.save(settings)
             settings.llm_api_key = env_api_key
             return settings
 
-        data = json.loads(source_path.read_text(encoding="utf-8"))
+        data = json.loads(self.path.read_text(encoding="utf-8"))
         for key, value in data.items():
             if hasattr(settings, key):
                 if key == "history_path" and value:
@@ -53,22 +65,21 @@ class SettingsStore:
                     value = [Skill(**item) for item in value if isinstance(item, dict)]
                 setattr(settings, key, value)
         settings.app_name = "Aura"
-        if source_path != self.path and settings.history_path:
-            old_history_path = settings.history_path
-            settings.history_path = self.base_dir / "history.sqlite"
-            if old_history_path.exists() and not settings.history_path.exists():
-                settings.history_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(old_history_path, settings.history_path)
+        # Removed legacy AgentVoice migration logic
         if settings.history_path is None:
             settings.history_path = self.base_dir / "history.sqlite"
-        if settings.model_cache_dir is None or settings.model_cache_dir.name == "huggingface":
+        # When running as a frozen (PyInstaller) bundle, always pin model_cache_dir
+        # to the install directory.  config.json may carry a stale dev-mode path
+        # from a previous development run, which would point to the source tree
+        # instead of <install>/models and break FunASR's tokenizer registry.
+        if getattr(sys, "frozen", False):
+            settings.model_cache_dir = project_root() / "models"
+        elif settings.model_cache_dir is None or settings.model_cache_dir.name == "huggingface":
             settings.model_cache_dir = project_root() / "models"
         if settings.stt_provider != "sensevoice-small":
             settings.stt_provider = "sensevoice-small"
         if not settings.llm_api_key:
             settings.llm_api_key = env_api_key
-        if source_path != self.path:
-            self.save(settings)
         return settings
 
     def save(self, settings: Settings) -> None:

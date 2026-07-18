@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 import threading
@@ -87,6 +89,10 @@ class AuraService:
             try:
                 self.warm_up_transcriber(on_status=on_status)
             except Exception as exc:
+                tb = traceback.format_exc()
+                logging.getLogger("aura").error(
+                    "STT model warmup failed: %s\n%s", exc, tb
+                )
                 if on_status:
                     on_status(f"{self.transcriber.name} 模型加载失败: {exc}")
 

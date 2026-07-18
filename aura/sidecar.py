@@ -3,9 +3,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
+import sys
 import threading
 import time
+import traceback
 from dataclasses import asdict, is_dataclass
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -17,6 +21,43 @@ from .models import DeviceInfo, Mode, RecordingResult, Session, Settings, Skill
 from .recorder import AudioRecorder
 from .runtime import ProcessingJobStore, RuntimeLog
 from .service import AuraService
+
+
+def _log_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "logs"
+    return Path(__file__).resolve().parent.parent / "logs"
+
+
+def _setup_logging() -> logging.Logger:
+    log_dir = _log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    today = datetime.now().strftime("%Y-%m-%d")
+    log_file = log_dir / f"aura-sidecar-{today}.log"
+
+    logger = logging.getLogger("aura")
+    logger.setLevel(logging.DEBUG)
+
+    # File handler - always detailed
+    fh = logging.FileHandler(str(log_file), encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.addHandler(fh)
+    logger.propagate = False
+
+    # Also capture uncaught exceptions
+    def _excepthook(exc_type, exc_value, exc_tb):
+        if exc_type is not None:
+            tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
+            logger.critical("UNCAUGHT: %s", "".join(tb_lines).strip())
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+    sys.excepthook = _excepthook
+
+    logger.info("Logging initialized: %s", log_file)
+    return logger
 
 
 JsonDict = dict[str, Any]
@@ -160,11 +201,22 @@ class AuraSidecar:
 
     def state(self) -> JsonDict:
         with self._lock:
+            try:
+                current_mode = mode_payload(self.service.current_mode)
+            except RuntimeError:
+                current_mode = {
+                    "id": "",
+                    "name": "暂无模式",
+                    "target": "",
+                    "description": "modes 目录不存在或为空",
+                    "system_prompt": "",
+                    "output_hint": "",
+                }
             return {
                 "settings": settings_payload(self.service.settings),
                 "modes": [mode_payload(mode) for mode in self.service.modes.all()],
                 "skills": [skill_payload(skill) for skill in self.service.settings.skills],
-                "current_mode": mode_payload(self.service.current_mode),
+                "current_mode": current_mode,
                 "current_session": session_payload(self.service.current_session),
                 "history": self.service.history.recent_sessions(),
                 "service": {
@@ -354,11 +406,24 @@ class AuraSidecar:
             self.logs.info("settings", "LLM settings saved")
             return {"state": self.state()}
 
+    def clear_all_data(self, payload: JsonDict) -> JsonDict:
+        """Clear all user data including config and history. Requires restart."""
+        with self._lock:
+            success = self.settings_store.clear_all_data()
+            if success:
+                self.latest_status = "所有数据已清除，请重启应用"
+                self.logs.info("settings", "All user data cleared - restart required")
+                return {"success": True, "message": "所有数据已清除，请重启应用"}
+            else:
+                self.latest_status = "清除数据失败"
+                self.logs.error("settings", "Failed to clear user data")
+                return {"success": False, "message": "清除数据失败"}
+
     def warm_up_stt(self) -> JsonDict:
         self.set_status("正在预加载转录模型")
         self.logs.info("stt", "STT preload requested")
         self.service.warm_up_transcriber_background(on_status=self.set_status)
-        return {"state": self.state()}
+        return {"ok": True, "status": self.latest_status}
 
     def start_recording(self) -> JsonDict:
         with self._lock:
@@ -583,6 +648,7 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
                     "/api/settings/general": app.save_general_settings,
                     "/api/settings/speech": app.save_speech_settings,
                     "/api/settings/llm": app.save_llm_settings,
+                    "/api/settings/clear_all_data": app.clear_all_data,
                     "/api/compile": app.compile_text,
                     "/api/turn/update": app.update_latest_turn,
                     "/api/record/start": lambda _: app.start_recording(),
@@ -602,7 +668,7 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
             except Exception as exc:
                 app.logs.error("http", str(exc), self.path)
                 app.set_status(str(exc), level="error", source="http")
-                self._send({"error": str(exc), "state": app.state()}, status=500)
+                self._send({"error": str(exc)}, status=500)
 
         def log_message(self, format: str, *args: Any) -> None:
             return
@@ -611,8 +677,25 @@ def build_handler(app: AuraSidecar) -> type[BaseHTTPRequestHandler]:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
-    app = AuraSidecar()
+    file_log = _setup_logging()
+    file_log.info("Aura sidecar starting... (host=%s port=%s)", host, port)
+
+    try:
+        app = AuraSidecar()
+    except Exception as exc:
+        file_log.critical("Failed to initialize AuraSidecar: %s", traceback.format_exc())
+        raise
+
     server = ThreadingHTTPServer((host, port), build_handler(app))
+
+    # Hook RuntimeLog to also write to file
+    _original_add = app.logs.add
+    def _add_with_file(level, source, message, details=""):
+        log_func = getattr(file_log, level if level in ("debug","info","warning","error","critical") else "info")
+        log_func("[%s] %s %s", source, message, details)
+        return _original_add(level, source, message, details)
+    app.logs.add = _add_with_file  # type: ignore[method-assign]
+
     print(
         json.dumps(
             {"status": "listening", "host": host, "port": server.server_port},
@@ -620,6 +703,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
         ),
         flush=True,
     )
+    file_log.info("Aura sidecar listening on %s:%s", host, server.server_port)
     server.serve_forever()
 
 
