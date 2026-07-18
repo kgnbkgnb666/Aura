@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run build:sidecar && tauri build",
+    "build:sidecar": "pyinstaller --onefile --name aura-sidecar-x86_64-pc-windows-msvc --distpath src-tauri/binaries --workpath build/pyinstaller --specpath build --collect-data funasr --collect-data modelscope aura/sidecar_entry.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

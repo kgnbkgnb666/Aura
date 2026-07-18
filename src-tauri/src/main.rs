@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
     time::Duration,
@@ -95,23 +95,83 @@ fn spawn_with(program: &str, prefix_args: &[&str], port: u16) -> std::io::Result
     let root = project_root();
     let port_arg = port.to_string();
 
-    Command::new(program)
-        .args(prefix_args)
-        .args(["-m", "aura.sidecar", "--host", "127.0.0.1", "--port"])
-        .arg(port_arg)
-        .current_dir(root)
-        .env("PYTHONUTF8", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        Command::new(program)
+            .args(prefix_args)
+            .args(["-m", "aura.sidecar", "--host", "127.0.0.1", "--port"])
+            .arg(port_arg)
+            .current_dir(root)
+            .env("PYTHONUTF8", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new(program)
+            .args(prefix_args)
+            .args(["-m", "aura.sidecar", "--host", "127.0.0.1", "--port"])
+            .arg(port_arg)
+            .current_dir(root)
+            .env("PYTHONUTF8", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    }
+}
+
+fn spawn_bundled_sidecar(exe_path: &Path, port: u16) -> std::io::Result<Child> {
+    let port_arg = port.to_string();
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        Command::new(exe_path)
+            .args(["--host", "127.0.0.1", "--port"])
+            .arg(port_arg)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new(exe_path)
+            .args(["--host", "127.0.0.1", "--port"])
+            .arg(port_arg)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    }
 }
 
 fn spawn_sidecar(port: u16) -> Result<Child, String> {
+    // Priority 1: explicit AURA_PYTHON env var
     if let Ok(program) = std::env::var("AURA_PYTHON") {
         if !program.trim().is_empty() {
             if let Ok(child) = spawn_with(&program, &[], port) {
                 return Ok(child);
+            }
+        }
+    }
+
+    // Priority 2 (release): bundled sidecar exe next to Aura.exe
+    #[cfg(not(debug_assertions))]
+    {
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(PathBuf::from));
+        if let Some(dir) = exe_dir {
+            let bundled = dir.join("aura-sidecar.exe");
+            if bundled.exists() {
+                return spawn_bundled_sidecar(&bundled, port)
+                    .map_err(|e| format!("Failed to launch bundled sidecar: {e}"));
             }
         }
     }
@@ -143,6 +203,7 @@ fn spawn_sidecar(port: u16) -> Result<Child, String> {
 
 #[tauri::command]
 fn ensure_sidecar(state: tauri::State<'_, SidecarState>) -> Result<SidecarInfo, String> {
+    // First, check if there's already a compatible sidecar running
     for port in SIDECAR_PORTS {
         if sidecar_is_compatible(port) {
             return Ok(SidecarInfo {
@@ -150,6 +211,17 @@ fn ensure_sidecar(state: tauri::State<'_, SidecarState>) -> Result<SidecarInfo, 
                 base_url: format!("http://127.0.0.1:{port}"),
             });
         }
+    }
+
+    // If no compatible sidecar found, kill all old sidecar processes to prevent multiple instances
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let _ = Command::new("taskkill")
+            .args(["/F", "/IM", "aura-sidecar.exe"])
+            .output();
+        // Wait for ports to be released
+        std::thread::sleep(Duration::from_millis(500));
     }
 
     let mut child_slot = state.child.lock().map_err(|_| "Sidecar lock poisoned".to_string())?;
@@ -245,6 +317,16 @@ fn main() {
                                     *child = None;
                                 }
                             }
+
+                            // Force kill all sidecar processes by name to prevent leaks
+                            #[cfg(target_os = "windows")]
+                            {
+                                use std::process::Command;
+                                let _ = Command::new("taskkill")
+                                    .args(["/F", "/IM", "aura-sidecar.exe"])
+                                    .output();
+                            }
+
                             app.exit(0);
                         }
                         _ => {}
@@ -278,9 +360,24 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                WindowEvent::Destroyed => {
+                    // Clean up sidecar when window is actually destroyed (app exit)
+                    if let Some(app) = window.app_handle().try_state::<SidecarState>() {
+                        if let Ok(mut child) = app.child.lock() {
+                            if let Some(ref mut process) = *child {
+                                let _ = process.kill();
+                                let _ = process.wait();
+                            }
+                            *child = None;
+                        }
+                    }
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
+import sys
 import threading
+import traceback
 from pathlib import Path
 from typing import Callable
-
-from .model_cache import resolve_modelscope_alias, resolve_modelscope_model
 
 
 StatusCallback = Callable[[str], None]
@@ -50,6 +51,7 @@ class SenseVoiceSmallTranscriber:
         return self._model is not None
 
     def load_model(self, status_callback: StatusCallback | None = None) -> None:
+        log = logging.getLogger("aura")
         if self._model is not None:
             self._status = "ready"
             self._progress = 100
@@ -72,6 +74,10 @@ class SenseVoiceSmallTranscriber:
             modelscope_cache = self.cache_dir / "modelscope"
             modelscope_cache.mkdir(parents=True, exist_ok=True)
             self._progress = 15
+            log.info("STT cache_dir=%s  modelscope_cache=%s  frozen=%s  exe=%s",
+                     self.cache_dir, modelscope_cache,
+                     getattr(sys, "frozen", False),
+                     getattr(sys, "executable", "N/A"))
             os.environ["MODELSCOPE_CACHE"] = str(modelscope_cache)
             os.environ["MODELSCOPE_MODULES_CACHE"] = str(modelscope_cache / "modules")
             os.environ.setdefault("MODELSCOPE_OFFLINE", "0")
@@ -84,34 +90,96 @@ class SenseVoiceSmallTranscriber:
             try:
                 self._progress = 25
                 from funasr import AutoModel
+                log.info("FunASR AutoModel imported successfully")
             except ImportError as exc:
                 self._status = "error"
                 self._progress = 0
                 self._last_error = "FunASR is not installed."
+                log.error("FunASR import failed: %s", traceback.format_exc())
                 raise RuntimeError(
                     "SenseVoice-Small requires FunASR. Run: pip install funasr modelscope torch"
                 ) from exc
 
+            # ------------------------------------------------------------------
+            # PyInstaller workaround #1: funasr's @tables.register decorator
+            # calls inspect.getsourcelines() to record source-location metadata
+            # (register.py:78).  PyInstaller does not bundle source code, so
+            # getsourcelines() raises OSError.  The actual class registration
+            # (register.py:70) happens *before* getsourcelines(), so we only
+            # lose debug metadata.  Monkey-patch getsourcelines to return a
+            # dummy value so decorators can complete without crashing.
+            # ------------------------------------------------------------------
+            import inspect as _inspect
+            _orig_getsourcelines = _inspect.getsourcelines
+
+            def _pyinstaller_safe_getsourcelines(obj):
+                try:
+                    return _orig_getsourcelines(obj)
+                except OSError:
+                    return (["# <pyinstaller: source not available>"], 0)
+
+            _inspect.getsourcelines = _pyinstaller_safe_getsourcelines
+
+            # ------------------------------------------------------------------
+            # PyInstaller workaround #2: funasr's __init__.py discovers and
+            # imports submodules via pkgutil.walk_packages, which triggers
+            # @tables.register decorators.  PyInstaller's virtual filesystem
+            # does not support walk_packages, so registries stay empty.
+            # Explicitly import the submodules that SenseVoiceSmall and its
+            # VAD model (fsmn-vad) need so AutoModel can resolve them.
+            # ------------------------------------------------------------------
+            try:
+                # Tokenizers
+                import funasr.tokenizer.sentencepiece_tokenizer  # SentencepiecesTokenizer
+
+                # Frontends
+                import funasr.frontends.wav_frontend              # WavFrontend
+
+                # Models
+                import funasr.models.sense_voice.model            # SenseVoiceSmall + SenseVoiceEncoderSmall
+                import funasr.models.fsmn_vad_streaming.model     # FsmnVADStreaming
+                import funasr.models.fsmn_vad_streaming.encoder   # FSMN, FSMNExport
+
+                # Specaug (spectrum augmentation - needed by SenseVoiceSmall.__init__)
+                import funasr.models.specaug.specaug              # SpecAug
+
+                # Normalize (normalization modules - needed by SenseVoiceSmall.__init__)
+                import funasr.models.normalize.global_mvn         # GlobalMVN
+                import funasr.models.normalize.utterance_mvn      # UtteranceMVN
+
+                # Encoder (needed by SenseVoiceSmall.__init__)
+                import funasr.models.sense_voice.model            # Contains SenseVoiceEncoderSmall
+
+                log.info("FunASR registrations imported successfully")
+            except ImportError as exc:
+                log.warning("Some FunASR registrations could not be imported: %s", exc)
+
             try:
                 self._progress = 40
-                model_source = resolve_modelscope_model(
-                    self.cache_dir,
-                    self.model_name,
-                    revision="master",
-                )
-                vad_source = resolve_modelscope_alias(self.cache_dir, self.vad_model)
-                self._progress = 55
+                # Always pass model *names* (not local snapshot paths) to
+                # AutoModel.  When a local path is passed, FunASR's build_model
+                # skips the hub-download path and the tokenizer/frontend
+                # registries are never populated, leading to:
+                #   TypeError: 'NoneType' object is not callable
+                # at tokenizer_class(**tokenizer_conf).
+                # The MODELSCOPE_CACHE env var (set above) ensures FunASR finds
+                # pre-downloaded models without re-downloading.
+                log.info("Calling AutoModel(model=%s, vad_model=%s, device=%s)...",
+                         self.model_name, self.vad_model, self.device)
                 self._model = AutoModel(
-                    model=model_source,
-                    vad_model=vad_source,
+                    model=self.model_name,
+                    vad_model=self.vad_model,
                     disable_update=True,
                     device=self.device,
                 )
+                log.info("AutoModel created successfully: %s", type(self._model))
                 self._progress = 90
             except Exception as exc:
                 self._status = "error"
                 self._progress = 0
                 self._last_error = str(exc)
+                log.error("AutoModel creation failed: %s\nTRACEBACK:\n%s",
+                          exc, traceback.format_exc())
                 raise
 
             self._status = "ready"

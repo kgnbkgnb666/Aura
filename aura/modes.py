@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import yaml
@@ -13,9 +14,16 @@ def _safe_slug(value: str) -> str:
     return slug or "mode"
 
 
+def _default_modes_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        # PyInstaller bundle: modes/ next to the exe
+        return Path(sys.executable).parent / "modes"
+    return Path(__file__).resolve().parent.parent / "modes"
+
+
 class ModeRegistry:
     def __init__(self, modes_dir: Path | None = None) -> None:
-        self.modes_dir = modes_dir or Path(__file__).resolve().parent.parent / "modes"
+        self.modes_dir = modes_dir or _default_modes_dir()
         self._modes: dict[str, Mode] = {}
 
     def load(self) -> "ModeRegistry":

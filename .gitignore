@@ -28,6 +28,7 @@ pnpm-debug.log*
 # Tauri / Rust build output
 src-tauri/gen/
 src-tauri/target/
+src-tauri/binaries/
 
 # Models and generated ML assets
 models/
