@@ -166,6 +166,7 @@ export default function App() {
         setBootStatus("正在准备语音识别模型");
         setBootStage("checking");
         let initial = await api.state();
+        if (!initial?.service) throw new Error("Sidecar 状态异常，请重启应用");
         setBootProgress(initial.service.transcriber_progress);
         setBootStage(initial.service.transcriber_status);
         setBootStatus(
@@ -177,6 +178,7 @@ export default function App() {
           await api.warmupStt();
           while (!cancelled) {
             initial = await api.state();
+            if (!initial?.service) continue;
             setBootProgress(initial.service.transcriber_progress);
             setBootStage(initial.service.transcriber_status);
             setBootStatus(initial.runtime.status || "正在加载语音识别模型");
@@ -600,45 +602,42 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
-      const payload = await api.warmupStt();
-      setState(payload.state);
+      await api.warmupStt();
 
-      // Poll until warmup completes or fails
-      let pollState = payload.state;
+      // Poll until warmup completes, fails, or we time out
       let waited = 0;
-      const maxWait = 90; // max 90 seconds for download
-      while (!pollState.service.transcriber_ready && waited < maxWait) {
+      const maxWait = 90;
+      while (waited < maxWait) {
         await new Promise((resolve) => window.setTimeout(resolve, 500));
         waited += 1;
+        let pollState: AppState;
         try {
-          pollState = (await api.state());
-          setState(pollState);
-          // Check if fallback changed the provider
-          if (pollState.service.transcriber !== draft.stt_provider) {
-            setDraft((prev) => ({ ...prev, stt_provider: pollState.service.transcriber }));
-          }
+          pollState = await api.state();
         } catch {
-          // state fetch failed, keep waiting
+          continue;
         }
-        if (pollState.service.transcriber_status === "error") {
-          break;
+        if (!pollState) continue;
+        setState(pollState);
+
+        // Check if fallback changed the provider and update draft accordingly
+        if (pollState.service.transcriber !== draft.stt_provider) {
+          setDraft((prev) => ({ ...prev, stt_provider: pollState.service.transcriber }));
         }
+        if (pollState.service.transcriber_ready) break;
+        if (pollState.service.transcriber_status === "error") break;
       }
 
-      // Update final state
       const finalState = await api.state();
-      setState(finalState);
-      setDraft(finalState.settings);
+      if (finalState) {
+        setState(finalState);
+        setDraft(finalState.settings);
+      }
 
-      if (!finalState.service.transcriber_ready) {
-        const errorMsg = finalState.service.transcriber_error
-          || finalState.runtime.status
-          || "预加载失败";
-        setError(errorMsg);
-        // If fallback happened, show a helpful message
-        if (finalState.service.transcriber !== "whisper-large-v3") {
-          setError(`${errorMsg}\n已自动切换回 ${finalState.service.transcriber}`);
-        }
+      // Show error if still not ready
+      const svc = finalState?.service;
+      if (!svc?.transcriber_ready) {
+        const msg = svc?.transcriber_error || "预加载超时，请检查网络后重试";
+        setError(svc?.transcriber !== "whisper-large-v3" ? `${msg}\n已自动切回 ${svc?.transcriber}` : msg);
       }
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));

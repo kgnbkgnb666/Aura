@@ -571,7 +571,7 @@ class AuraSidecar:
                 self.logs.info("stt", f"Config saved after fallback to {self.service.settings.stt_provider}")
 
         self.service.warm_up_transcriber_background(on_status=self.set_status, on_fallback=on_fallback)
-        return {"ok": True, "status": self.latest_status}
+        return {"ok": True, "status": self.latest_status, "state": self.state()}
 
     def start_recording(self) -> JsonDict:
         with self._lock:
