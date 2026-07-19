@@ -108,9 +108,23 @@ class AuraService:
                     f"当前环境缺少必要的库。"
                 )
 
-        # Build the transcriber
+        # Build the transcriber (may still fail due to network/download issues)
         if self.settings.stt_provider == "whisper-large-v3":
-            return WhisperLargeV3Transcriber(cache_dir=self.settings.model_cache_dir)
+            try:
+                return WhisperLargeV3Transcriber(cache_dir=self.settings.model_cache_dir)
+            except Exception as exc:
+                log = logging.getLogger("aura")
+                error_str = str(exc)
+                # Check if it's a network/download error
+                if any(keyword in error_str for keyword in ["ConnectTimeout", "LocalEntryNotFoundError", "网络", "connection"]):
+                    log.error("Whisper model download failed due to network error: %s", exc)
+                    # Fall back to sensevoice-small
+                    if get_available_stt_providers().get("sensevoice-small"):
+                        log.warning("Falling back to sensevoice-small due to network error")
+                        self.settings.stt_provider = "sensevoice-small"
+                        return SenseVoiceSmallTranscriber(cache_dir=self.settings.model_cache_dir)
+                # Re-raise if not a network error or no fallback available
+                raise
         else:
             self.settings.stt_provider = "sensevoice-small"
             return SenseVoiceSmallTranscriber(cache_dir=self.settings.model_cache_dir)
@@ -119,7 +133,32 @@ class AuraService:
         """Replace the STT engine and invalidate any warmup for the previous one."""
         with self._warmup_lock:
             self._warmup_generation += 1
-            self.transcriber = self._build_transcriber()
+            try:
+                self.transcriber = self._build_transcriber()
+            except Exception as exc:
+                # If build fails (e.g., network error during model download),
+                # ensure we have a working fallback
+                log = logging.getLogger("aura")
+                log.error("Failed to build transcriber for '%s': %s",
+                         self.settings.stt_provider, exc)
+
+                # Try to fallback to sensevoice-small
+                if self.settings.stt_provider != "sensevoice-small":
+                    log.warning("Attempting fallback to sensevoice-small")
+                    self.settings.stt_provider = "sensevoice-small"
+                    try:
+                        self.transcriber = SenseVoiceSmallTranscriber(
+                            cache_dir=self.settings.model_cache_dir
+                        )
+                        log.info("Successfully fell back to sensevoice-small")
+                    except Exception as fallback_exc:
+                        log.critical("Fallback also failed: %s", fallback_exc)
+                        raise RuntimeError(
+                            f"无法初始化任何 STT 模型。原始错误: {exc}"
+                        ) from fallback_exc
+                else:
+                    # Already on sensevoice-small and it failed
+                    raise
             # The old thread may still be finishing, but it must not prevent the
             # newly selected model from starting its own warmup.
             self._warmup_thread = None
