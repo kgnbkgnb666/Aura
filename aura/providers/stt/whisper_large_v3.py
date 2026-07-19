@@ -36,6 +36,35 @@ def _is_cuda_library_error(exc: Exception) -> bool:
     )
 
 
+# HuggingFace 镜像站（国内用户优先使用镜像加速下载）
+_HF_MIRRORS = [
+    "https://hf-mirror.com",
+    "https://huggingface.co",
+]
+
+def _configure_hf_endpoint() -> str:
+    """Pick an accessible HuggingFace endpoint and disable Xet when on a mirror.
+
+    huggingface.co is often blocked in China, so we default to hf-mirror.com.
+    Mirror backends don't support the Xet CAS protocol, so we also set
+    HF_HUB_DISABLE_XET=1 to force plain HTTP downloads.
+    """
+    if os.environ.get("HF_ENDPOINT"):
+        return os.environ["HF_ENDPOINT"]
+
+    if os.environ.get("HF_NO_MIRROR", "").strip() in ("1", "true", "yes"):
+        return "https://huggingface.co"
+
+    mirror = os.environ.get("HF_MIRROR", "https://hf-mirror.com")
+    os.environ["HF_ENDPOINT"] = mirror
+
+    # Mirror backends don't support Xet — disable it
+    if not os.environ.get("HF_HUB_DISABLE_XET"):
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+
+    return mirror
+
+
 class WhisperLargeV3Transcriber:
     name = "whisper-large-v3"
 
@@ -81,6 +110,12 @@ class WhisperLargeV3Transcriber:
             try:
                 from faster_whisper import WhisperModel
                 import ctranslate2
+
+                # Use mirror for HuggingFace downloads (hf.co blocked in China)
+                endpoint = _configure_hf_endpoint()
+                logging.getLogger("aura").info(
+                    "Whisper HF endpoint: %s", endpoint
+                )
 
                 has_cuda = ctranslate2.get_cuda_device_count() > 0 and _cuda_runtime_available()
                 device = "cuda" if has_cuda else "cpu"

@@ -192,12 +192,22 @@ export default function App() {
         if (cancelled) return;
         setBootProgress(100);
         setBootStage("ready");
-        setBootStatus("语音识别模型已就绪");
+
+        // Detect if a fallback happened (Whisper -> SenseVoice)
+        const savedProvider = initial.settings.stt_provider;
+        const actualProvider = initial.service.transcriber;
+        const bootDidFallback = savedProvider === "whisper-large-v3"
+                             && actualProvider === "sensevoice-small";
+        setBootStatus(bootDidFallback
+          ? "Whisper 下载失败，已切换回 SenseVoice Small"
+          : "语音识别模型已就绪");
         const latestHistory = initial.history[0];
         const restored = latestHistory ? await api.loadSession(latestHistory.id) : null;
         const next = restored?.state || (await api.newSession(initial.current_mode?.id || initial.settings.mode_id)).state;
         if (!cancelled) {
-          setState(next);
+          setState(bootDidFallback
+            ? { ...next, runtime: { ...next.runtime, status: "Whisper 下载失败，已切回 SenseVoice Small" } }
+            : next);
           setDraft(next.settings);
           setModeDrafts(next.modes);
           setSkillDrafts(stateSkills(next));
@@ -602,6 +612,7 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
+      const prevProvider = draft.stt_provider;
       await api.warmupStt();
 
       // Poll until warmup completes, fails, or we time out
@@ -633,11 +644,20 @@ export default function App() {
         setDraft(finalState.settings);
       }
 
-      // Show error if still not ready
       const svc = finalState?.service;
+      const actualProvider = svc?.transcriber || "";
+      const didFallback = prevProvider === "whisper-large-v3"
+                       && actualProvider === "sensevoice-small";
+
       if (!svc?.transcriber_ready) {
         const msg = svc?.transcriber_error || "预加载超时，请检查网络后重试";
-        setError(svc?.transcriber !== "whisper-large-v3" ? `${msg}\n已自动切回 ${svc?.transcriber}` : msg);
+        setError(didFallback ? `${msg}\n已自动切回 SenseVoice Small` : msg);
+      } else if (didFallback) {
+        // Fallback succeeded — show friendly reminder, not a blocking error
+        setState((prev) => prev ? {
+          ...prev,
+          runtime: { ...prev.runtime, status: "Whisper 下载失败，已切换回 SenseVoice Small" }
+        } : prev);
       }
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
