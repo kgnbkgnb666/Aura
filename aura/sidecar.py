@@ -30,6 +30,7 @@ from .models import DeviceInfo, Mode, RecordingResult, Session, Settings, Skill
 from .recorder import AudioRecorder
 from .runtime import ProcessingJobStore, RuntimeLog
 from .service import AuraService
+from .providers.stt.dependencies import validate_stt_provider, get_available_stt_providers
 
 API_KEY_MASK = "********"
 MAX_REQUEST_BODY_BYTES = 1024 * 1024
@@ -437,14 +438,70 @@ class AuraSidecar:
             if cache_dir:
                 settings.model_cache_dir = Path(cache_dir)
             provider = str(payload.get("stt_provider") or settings.stt_provider)
-            settings.stt_provider = (
-                provider
-                if provider in {"sensevoice-small", "whisper-large-v3"}
-                else "sensevoice-small"
-            )
+
+            # Validate provider name
+            if provider not in {"sensevoice-small", "whisper-large-v3"}:
+                provider = "sensevoice-small"
+
+            # Check if the requested provider is available
+            is_valid, error_msg = validate_stt_provider(provider)
+
+            if not is_valid:
+                # Provider dependencies not available
+                self.logs.warning("stt", f"Provider '{provider}' not available: {error_msg}")
+
+                # Try to find an available fallback
+                available = get_available_stt_providers()
+                if available.get("sensevoice-small"):
+                    fallback_provider = "sensevoice-small"
+                    self.logs.info("stt", f"Falling back to sensevoice-small")
+                    settings.stt_provider = fallback_provider
+                    self.settings_store.save(settings)
+                    self.latest_status = f"切换失败：{error_msg.split(chr(10))[0]}"
+                    return {
+                        "error": error_msg,
+                        "fallback_provider": fallback_provider,
+                        "state": self.state()
+                    }
+                elif available.get("whisper-large-v3"):
+                    fallback_provider = "whisper-large-v3"
+                    self.logs.info("stt", f"Falling back to whisper-large-v3")
+                    settings.stt_provider = fallback_provider
+                    self.settings_store.save(settings)
+                    self.latest_status = f"切换失败：{error_msg.split(chr(10))[0]}"
+                    return {
+                        "error": error_msg,
+                        "fallback_provider": fallback_provider,
+                        "state": self.state()
+                    }
+                else:
+                    # No provider available at all
+                    self.latest_status = "无可用的 STT 模型"
+                    return {
+                        "error": error_msg,
+                        "state": self.state()
+                    }
+
+            # Provider is valid, proceed with the switch
+            settings.stt_provider = provider
+
             if settings.model_cache_dir != previous_cache_dir or settings.stt_provider != previous_provider:
-                self.service.replace_transcriber()
-                self.service.warm_up_transcriber_background(on_status=self.set_status)
+                try:
+                    self.service.replace_transcriber()
+                    self.service.warm_up_transcriber_background(on_status=self.set_status)
+                except Exception as exc:
+                    # Failed to initialize transcriber, rollback
+                    self.logs.error("stt", f"Failed to initialize {provider}: {exc}")
+                    settings.stt_provider = previous_provider
+                    settings.model_cache_dir = previous_cache_dir
+                    self.service.replace_transcriber()
+                    self.settings_store.save(settings)
+                    self.latest_status = f"模型切换失败：{str(exc)[:50]}"
+                    return {
+                        "error": f"模型初始化失败：{exc}",
+                        "state": self.state()
+                    }
+
             self.settings_store.save(settings)
             self.latest_status = "语音设置已保存"
             self.logs.info("settings", "Speech settings saved")

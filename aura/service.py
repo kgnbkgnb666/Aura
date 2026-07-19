@@ -13,6 +13,7 @@ from .models import CompileRequest, Mode, Settings, Session
 from .modes import ModeRegistry
 from .providers.llm import OpenAICompatibleClient, RuleBasedCompiler
 from .providers.stt import SenseVoiceSmallTranscriber, WhisperLargeV3Transcriber
+from .providers.stt.dependencies import validate_stt_provider, get_available_stt_providers
 from .session import SessionManager
 
 
@@ -68,10 +69,51 @@ class AuraService:
         return RuleBasedCompiler()
 
     def _build_transcriber(self):
+        """Build transcriber with validation and fallback."""
+        requested_provider = self.settings.stt_provider
+
+        # Validate the requested provider
+        is_valid, error_msg = validate_stt_provider(requested_provider)
+
+        if not is_valid:
+            log = logging.getLogger("aura")
+            log.warning(
+                "Requested STT provider '%s' is not available: %s",
+                requested_provider,
+                error_msg
+            )
+
+            # Try to find an available fallback
+            available = get_available_stt_providers()
+            fallback_provider = None
+
+            # Prefer sensevoice-small as fallback
+            if available.get("sensevoice-small"):
+                fallback_provider = "sensevoice-small"
+            elif available.get("whisper-large-v3"):
+                fallback_provider = "whisper-large-v3"
+
+            if fallback_provider:
+                log.info(
+                    "Falling back to '%s' (available provider)",
+                    fallback_provider
+                )
+                self.settings.stt_provider = fallback_provider
+            else:
+                # No provider available, raise error
+                raise RuntimeError(
+                    f"无法初始化任何 STT 模型。请安装依赖：\n\n"
+                    f"- SenseVoice Small: pip install funasr modelscope\n"
+                    f"- Whisper Large V3: pip install faster-whisper\n\n"
+                    f"当前环境缺少必要的库。"
+                )
+
+        # Build the transcriber
         if self.settings.stt_provider == "whisper-large-v3":
             return WhisperLargeV3Transcriber(cache_dir=self.settings.model_cache_dir)
-        self.settings.stt_provider = "sensevoice-small"
-        return SenseVoiceSmallTranscriber(cache_dir=self.settings.model_cache_dir)
+        else:
+            self.settings.stt_provider = "sensevoice-small"
+            return SenseVoiceSmallTranscriber(cache_dir=self.settings.model_cache_dir)
 
     def replace_transcriber(self) -> None:
         """Replace the STT engine and invalidate any warmup for the previous one."""
