@@ -488,7 +488,20 @@ class AuraSidecar:
             if settings.model_cache_dir != previous_cache_dir or settings.stt_provider != previous_provider:
                 try:
                     self.service.replace_transcriber()
-                    self.service.warm_up_transcriber_background(on_status=self.set_status)
+
+                    # Define a callback to save config if background warmup triggers a fallback
+                    def on_fallback_callback():
+                        """Called by background warmup if it falls back to a different provider."""
+                        with self._lock:
+                            # Save the updated provider to config
+                            self.settings_store.save(self.service.settings)
+                            self.logs.info("stt", f"Config updated after background fallback to {self.service.settings.stt_provider}")
+
+                    # Pass the callback to warmup
+                    self.service.warm_up_transcriber_background(
+                        on_status=self.set_status,
+                        on_fallback=on_fallback_callback
+                    )
                 except Exception as exc:
                     # Failed to initialize transcriber, rollback
                     self.logs.error("stt", f"Failed to initialize {provider}: {exc}")
@@ -502,6 +515,10 @@ class AuraSidecar:
                         "state": self.state()
                     }
 
+            # Save the configuration
+            # Note: If warmup fails later due to network, the background thread will
+            # auto-fallback, but the config will still show whisper-large-v3.
+            # We'll need a mechanism to update config after background fallback.
             self.settings_store.save(settings)
             self.latest_status = "语音设置已保存"
             self.logs.info("settings", "Speech settings saved")
@@ -546,7 +563,14 @@ class AuraSidecar:
     def warm_up_stt(self) -> JsonDict:
         self.set_status("正在预加载转录模型")
         self.logs.info("stt", "STT preload requested")
-        self.service.warm_up_transcriber_background(on_status=self.set_status)
+
+        def on_fallback():
+            """Save config after background fallback."""
+            with self._lock:
+                self.settings_store.save(self.service.settings)
+                self.logs.info("stt", f"Config saved after fallback to {self.service.settings.stt_provider}")
+
+        self.service.warm_up_transcriber_background(on_status=self.set_status, on_fallback=on_fallback)
         return {"ok": True, "status": self.latest_status}
 
     def start_recording(self) -> JsonDict:
@@ -600,7 +624,7 @@ class AuraSidecar:
 
     def _process_recording_job(self, job_id: str, wav_path: Path) -> None:
         try:
-            transcript = self.service.transcribe(wav_path, on_status=self.set_status).strip()
+            transcript = self._transcribe_with_fallback(wav_path)
             self._update_job(job_id, transcript=transcript, phase="compiling")
             self.logs.info("stt", "Transcript ready", transcript)
             self.set_status("正在整理")
@@ -621,6 +645,32 @@ class AuraSidecar:
         finally:
             if wav_path.exists():
                 wav_path.unlink(missing_ok=True)
+
+    def _transcribe_with_fallback(self, wav_path: Path) -> str:
+        """Transcribe audio, falling back to SenseVoice if current model fails."""
+        try:
+            return self.service.transcribe(wav_path, on_status=self.set_status).strip()
+        except Exception as exc:
+            error_str = str(exc).lower()
+            is_stt_error = any(kw in error_str for kw in [
+                "connecttimeout", "localentrynotfound",
+                "connection", "download", "network", "timeout", "not found"
+            ])
+
+            # If using whisper and it fails, try fallback to sensevoice-small
+            if is_stt_error and self.service.settings.stt_provider == "whisper-large-v3":
+                self.logs.warning("stt", f"Transcription failed on whisper, trying fallback: {exc}")
+                try:
+                    # Switch to sensevoice-small
+                    with self._lock:
+                        self.service.settings.stt_provider = "sensevoice-small"
+                        self.service.replace_transcriber()
+                        self.settings_store.save(self.service.settings)
+                    self.logs.info("stt", "Fell back to sensevoice-small for transcription")
+                    return self.service.transcribe(wav_path, on_status=self.set_status).strip()
+                except Exception as fallback_exc:
+                    self.logs.error("stt", f"Fallback transcription also failed: {fallback_exc}")
+            raise
 
     def test_microphone(self, payload: JsonDict) -> JsonDict:
         duration = max(0.5, min(float(payload.get("duration_seconds", 3)), 10.0))

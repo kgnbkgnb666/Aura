@@ -192,7 +192,11 @@ class AuraService:
             return
         self.transcriber.load_model(status_callback=on_status)
 
-    def warm_up_transcriber_background(self, on_status: TextCallback | None = None) -> None:
+    def warm_up_transcriber_background(
+        self,
+        on_status: TextCallback | None = None,
+        on_fallback: Callable[[], None] | None = None,
+    ) -> None:
         with self._warmup_lock:
             transcriber = self.transcriber
             generation = self._warmup_generation
@@ -215,10 +219,52 @@ class AuraService:
                     transcriber.load_model(status_callback=report_status)
                 except Exception as exc:
                     tb = traceback.format_exc()
-                    logging.getLogger("aura").error(
-                        "STT model warmup failed: %s\n%s", exc, tb
-                    )
-                    report_status(f"{transcriber.name} 模型加载失败: {exc}")
+                    log = logging.getLogger("aura")
+                    log.error("STT model warmup failed: %s\n%s", exc, tb)
+
+                    # Check if it's a network/download error and we can fallback
+                    error_str = str(exc)
+                    is_network_error = any(keyword in error_str.lower() for keyword in
+                                          ["connecttimeout", "localentrynotfound",
+                                           "connection", "timeout", "网络"])
+
+                    # Only attempt fallback if this is a network error and we're on whisper
+                    if is_network_error and transcriber.name == "whisper-large-v3":
+                        with self._warmup_lock:
+                            # Check if generation is still valid
+                            if generation == self._warmup_generation:
+                                log.warning("Whisper download failed due to network error, attempting fallback to sensevoice-small")
+
+                                # Check if sensevoice is available
+                                if get_available_stt_providers().get("sensevoice-small"):
+                                    try:
+                                        # Switch to sensevoice-small
+                                        self.settings.stt_provider = "sensevoice-small"
+                                        new_transcriber = SenseVoiceSmallTranscriber(
+                                            cache_dir=self.settings.model_cache_dir
+                                        )
+                                        # Replace the transcriber
+                                        self.transcriber = new_transcriber
+                                        self._warmup_generation += 1
+
+                                        log.info("Successfully switched to sensevoice-small")
+                                        report_status("网络连接失败，已自动切换到 SenseVoice Small，正在加载...")
+
+                                        # Notify sidecar to save updated config
+                                        if on_fallback:
+                                            try:
+                                                on_fallback()
+                                            except Exception as fc_exc:
+                                                log.error("on_fallback callback failed: %s", fc_exc)
+
+                                        # Now warm up the new transcriber
+                                        new_transcriber.load_model(status_callback=report_status)
+                                        return
+                                    except Exception as fallback_exc:
+                                        log.error("Fallback to sensevoice-small also failed: %s", fallback_exc)
+
+                    # If we reach here, either no fallback was attempted or it failed
+                    report_status(f"{transcriber.name} 模型加载失败: {str(exc)[:100]}")
 
             self._warmup_thread = threading.Thread(target=work, daemon=True)
             self._warmup_thread.start()
