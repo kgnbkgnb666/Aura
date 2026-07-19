@@ -198,25 +198,27 @@ class AuraService:
         on_fallback: Callable[[], None] | None = None,
     ) -> None:
         with self._warmup_lock:
-            transcriber = self.transcriber
-            generation = self._warmup_generation
-            if transcriber.is_ready:
+            # Use mutable wrappers so the closure can update them after fallback
+            _generation = [self._warmup_generation]
+            _transcriber = [self.transcriber]
+
+            if _transcriber[0].is_ready:
                 if on_status:
-                    on_status(f"{transcriber.name} 模型已就绪")
+                    on_status(f"{_transcriber[0].name} 模型已就绪")
                 return
             if self._warmup_thread and self._warmup_thread.is_alive():
                 return
 
             def report_status(message: str) -> None:
                 with self._warmup_lock:
-                    if generation != self._warmup_generation or transcriber is not self.transcriber:
+                    if _generation[0] != self._warmup_generation or _transcriber[0] is not self.transcriber:
                         return
                 if on_status:
                     on_status(message)
 
             def work() -> None:
                 try:
-                    transcriber.load_model(status_callback=report_status)
+                    _transcriber[0].load_model(status_callback=report_status)
                 except Exception as exc:
                     tb = traceback.format_exc()
                     log = logging.getLogger("aura")
@@ -229,10 +231,10 @@ class AuraService:
                                            "connection", "timeout", "网络"])
 
                     # Only attempt fallback if this is a network error and we're on whisper
-                    if is_network_error and transcriber.name == "whisper-large-v3":
+                    if is_network_error and _transcriber[0].name == "whisper-large-v3":
                         with self._warmup_lock:
                             # Check if generation is still valid
-                            if generation == self._warmup_generation:
+                            if _generation[0] == self._warmup_generation:
                                 log.warning("Whisper download failed due to network error, attempting fallback to sensevoice-small")
 
                                 # Check if sensevoice is available
@@ -247,8 +249,12 @@ class AuraService:
                                         self.transcriber = new_transcriber
                                         self._warmup_generation += 1
 
+                                        # CRITICAL: Update the closure's references so
+                                        # report_status will pass the generation check
+                                        _transcriber[0] = self.transcriber
+                                        _generation[0] = self._warmup_generation
+
                                         log.info("Successfully switched to sensevoice-small")
-                                        report_status("网络连接失败，已自动切换到 SenseVoice Small，正在加载...")
 
                                         # Notify sidecar to save updated config
                                         if on_fallback:
@@ -258,13 +264,16 @@ class AuraService:
                                                 log.error("on_fallback callback failed: %s", fc_exc)
 
                                         # Now warm up the new transcriber
+                                        # report_status works now because we synced _generation
+                                        report_status("网络连接失败，已自动切换到 SenseVoice Small，正在加载...")
                                         new_transcriber.load_model(status_callback=report_status)
+                                        log.info("Fallback to sensevoice-small completed successfully")
                                         return
                                     except Exception as fallback_exc:
                                         log.error("Fallback to sensevoice-small also failed: %s", fallback_exc)
 
                     # If we reach here, either no fallback was attempted or it failed
-                    report_status(f"{transcriber.name} 模型加载失败: {str(exc)[:100]}")
+                    report_status(f"{_transcriber[0].name} 模型加载失败: {str(exc)[:100]}")
 
             self._warmup_thread = threading.Thread(target=work, daemon=True)
             self._warmup_thread.start()
