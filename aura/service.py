@@ -231,6 +231,8 @@ class AuraService:
                                            "connection", "timeout", "网络"])
 
                     # Only attempt fallback if this is a network error and we're on whisper
+                    fallback_model = None  # will hold the fallback transcriber
+
                     if is_network_error and _transcriber[0].name == "whisper-large-v3":
                         with self._warmup_lock:
                             # Check if generation is still valid
@@ -249,8 +251,7 @@ class AuraService:
                                         self.transcriber = new_transcriber
                                         self._warmup_generation += 1
 
-                                        # CRITICAL: Update the closure's references so
-                                        # report_status will pass the generation check
+                                        # Update closure refs so report_status passes checks
                                         _transcriber[0] = self.transcriber
                                         _generation[0] = self._warmup_generation
 
@@ -263,14 +264,23 @@ class AuraService:
                                             except Exception as fc_exc:
                                                 log.error("on_fallback callback failed: %s", fc_exc)
 
-                                        # Now warm up the new transcriber
-                                        # report_status works now because we synced _generation
-                                        report_status("网络连接失败，已自动切换到 SenseVoice Small，正在加载...")
-                                        new_transcriber.load_model(status_callback=report_status)
-                                        log.info("Fallback to sensevoice-small completed successfully")
-                                        return
+                                        # Save the model ref to load OUTSIDE the lock
+                                        # (calling load_model inside would deadlock because
+                                        # report_status tries to re-acquire _warmup_lock)
+                                        fallback_model = new_transcriber
                                     except Exception as fallback_exc:
                                         log.error("Fallback to sensevoice-small also failed: %s", fallback_exc)
+                        # --- Lock released here ---
+
+                    # Now load the fallback model OUTSIDE the lock (no deadlock)
+                    if fallback_model is not None:
+                        try:
+                            report_status("网络连接失败，已自动切换到 SenseVoice Small，正在加载...")
+                            fallback_model.load_model(status_callback=report_status)
+                            log.info("Fallback to sensevoice-small completed successfully")
+                            return
+                        except Exception as fallback_exc:
+                            log.error("Fallback model load failed: %s", fallback_exc)
 
                     # If we reach here, either no fallback was attempted or it failed
                     report_status(f"{_transcriber[0].name} 模型加载失败: {str(exc)[:100]}")

@@ -597,8 +597,54 @@ export default function App() {
   }
 
   async function warmup() {
-    const payload = await api.warmupStt();
-    setState(payload.state);
+    setBusy(true);
+    setError("");
+    try {
+      const payload = await api.warmupStt();
+      setState(payload.state);
+
+      // Poll until warmup completes or fails
+      let pollState = payload.state;
+      let waited = 0;
+      const maxWait = 90; // max 90 seconds for download
+      while (!pollState.service.transcriber_ready && waited < maxWait) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        waited += 1;
+        try {
+          pollState = (await api.state());
+          setState(pollState);
+          // Check if fallback changed the provider
+          if (pollState.service.transcriber !== draft.stt_provider) {
+            setDraft((prev) => ({ ...prev, stt_provider: pollState.service.transcriber }));
+          }
+        } catch {
+          // state fetch failed, keep waiting
+        }
+        if (pollState.service.transcriber_status === "error") {
+          break;
+        }
+      }
+
+      // Update final state
+      const finalState = await api.state();
+      setState(finalState);
+      setDraft(finalState.settings);
+
+      if (!finalState.service.transcriber_ready) {
+        const errorMsg = finalState.service.transcriber_error
+          || finalState.runtime.status
+          || "预加载失败";
+        setError(errorMsg);
+        // If fallback happened, show a helpful message
+        if (finalState.service.transcriber !== "whisper-large-v3") {
+          setError(`${errorMsg}\n已自动切换回 ${finalState.service.transcriber}`);
+        }
+      }
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function testMicrophone() {
