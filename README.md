@@ -180,7 +180,7 @@ npm run tauri:dev
 hf download Systran/faster-whisper-large-v3 --cache-dir models/huggingface
 ```
 
-Whisper Large V3 会自动使用可用的 NVIDIA GPU；没有兼容 GPU 时使用 CPU `int8`，可以正常运行，但识别速度会明显变慢。
+Whisper Large V3 会在 CUDA 12 cuBLAS 与 cuDNN 9 完整可用时启用 NVIDIA GPU。缺少 `cublas64_12.dll`、`cudnn_ops64_9.dll` 或没有兼容 GPU 时，会自动回退到 CPU `int8`；可以正常运行，但识别速度会明显变慢。
 
 ### 3️⃣ 推荐：用环境变量配置 API Key
 

@@ -410,6 +410,41 @@ def test_sidecar_switches_to_whisper_large_v3(tmp_path, monkeypatch):
     assert payload["state"]["settings"]["stt_provider"] == "whisper-large-v3"
 
 
+def test_switching_stt_while_previous_model_loads_starts_new_warmup(tmp_path, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    new_started = threading.Event()
+
+    class FakeTranscriber:
+        def __init__(self, name, started=None):
+            self.name = name
+            self.is_ready = False
+            self.status = "not_loaded"
+            self.progress = 0
+            self.last_error = ""
+            self._started = started
+
+        def load_model(self, status_callback=None):
+            if self._started:
+                self._started.set()
+            if self.name == "old":
+                release.wait(timeout=2)
+            self.is_ready = True
+
+    app = local_app(tmp_path)
+    old = FakeTranscriber("old", entered)
+    new = FakeTranscriber("new", new_started)
+    app.service.transcriber = old
+    app.service.warm_up_transcriber_background()
+    assert entered.wait(timeout=2)
+
+    monkeypatch.setattr(app.service, "_build_transcriber", lambda: new)
+    app.save_speech_settings({"stt_provider": "whisper-large-v3"})
+
+    assert new_started.wait(timeout=2)
+    release.set()
+
+
 def test_general_theme_setting_is_saved(tmp_path):
     app = local_app(tmp_path)
 

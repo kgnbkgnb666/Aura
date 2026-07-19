@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ctypes
 import logging
+import os
 import threading
 import traceback
 from pathlib import Path
@@ -8,6 +10,30 @@ from typing import Callable
 
 
 StatusCallback = Callable[[str], None]
+
+
+def _cuda_runtime_available() -> bool:
+    """Check the CUDA libraries required by CTranslate2 before selecting the GPU."""
+    libraries = (
+        ("cublas64_12.dll", "cudnn_ops64_9.dll")
+        if os.name == "nt"
+        else ("libcublas.so.12", "libcudnn.so.9")
+    )
+    loader = ctypes.WinDLL if os.name == "nt" else ctypes.CDLL
+    try:
+        for library in libraries:
+            loader(library)
+    except OSError:
+        return False
+    return True
+
+
+def _is_cuda_library_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in ("cublas", "cudnn", "cuda runtime", "cuda driver")
+    )
 
 
 class WhisperLargeV3Transcriber:
@@ -21,6 +47,7 @@ class WhisperLargeV3Transcriber:
         self._status = "not_loaded"
         self._progress = 0
         self._last_error = ""
+        self._device = "cpu"
 
     @property
     def status(self) -> str:
@@ -55,7 +82,7 @@ class WhisperLargeV3Transcriber:
                 from faster_whisper import WhisperModel
                 import ctranslate2
 
-                has_cuda = ctranslate2.get_cuda_device_count() > 0
+                has_cuda = ctranslate2.get_cuda_device_count() > 0 and _cuda_runtime_available()
                 device = "cuda" if has_cuda else "cpu"
                 compute_type = "float16" if has_cuda else "int8"
                 cached = any(
@@ -77,6 +104,7 @@ class WhisperLargeV3Transcriber:
                     compute_type=compute_type,
                     download_root=str(self.cache_dir),
                 )
+                self._device = device
                 self._status = "ready"
                 self._progress = 100
                 if status_callback:
@@ -101,10 +129,34 @@ class WhisperLargeV3Transcriber:
         self.load_model(status_callback=status_callback)
         if status_callback:
             status_callback("正在使用 Whisper Large V3 识别语音")
-        segments, _ = self._model.transcribe(
-            str(audio_path),
-            beam_size=5,
-            vad_filter=True,
-            language=None,
-        )
+        try:
+            segments, _ = self._model.transcribe(
+                str(audio_path),
+                beam_size=5,
+                vad_filter=True,
+                language=None,
+            )
+        except Exception as exc:
+            if self._device != "cuda" or not _is_cuda_library_error(exc):
+                raise
+            logging.getLogger("aura").warning(
+                "CUDA runtime is incomplete; retrying Whisper Large V3 on CPU: %s", exc
+            )
+            if status_callback:
+                status_callback("CUDA 运行库不完整，已自动切换到 CPU 模式")
+            from faster_whisper import WhisperModel
+
+            self._model = WhisperModel(
+                "large-v3",
+                device="cpu",
+                compute_type="int8",
+                download_root=str(self.cache_dir),
+            )
+            self._device = "cpu"
+            segments, _ = self._model.transcribe(
+                str(audio_path),
+                beam_size=5,
+                vad_filter=True,
+                language=None,
+            )
         return "".join(segment.text for segment in segments).strip()

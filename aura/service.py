@@ -32,7 +32,9 @@ class AuraService:
         self.history = HistoryStore(self.settings.history_path)
         self.transcriber = self._build_transcriber()
         self.compiler = PromptCompiler(self._build_llm())
+        self._warmup_lock = threading.Lock()
         self._warmup_thread: threading.Thread | None = None
+        self._warmup_generation = 0
 
     @property
     def current_session(self) -> Session:
@@ -71,6 +73,15 @@ class AuraService:
         self.settings.stt_provider = "sensevoice-small"
         return SenseVoiceSmallTranscriber(cache_dir=self.settings.model_cache_dir)
 
+    def replace_transcriber(self) -> None:
+        """Replace the STT engine and invalidate any warmup for the previous one."""
+        with self._warmup_lock:
+            self._warmup_generation += 1
+            self.transcriber = self._build_transcriber()
+            # The old thread may still be finishing, but it must not prevent the
+            # newly selected model from starting its own warmup.
+            self._warmup_thread = None
+
     def new_session(self, mode_id: str | None = None) -> Session:
         resolved_mode_id = self.modes.resolve_id(mode_id or self.settings.mode_id)
         session = self.sessions.new_session(resolved_mode_id)
@@ -101,26 +112,35 @@ class AuraService:
         self.transcriber.load_model(status_callback=on_status)
 
     def warm_up_transcriber_background(self, on_status: TextCallback | None = None) -> None:
-        if self.transcriber.is_ready:
-            if on_status:
-                on_status(f"{self.transcriber.name} 模型已就绪")
-            return
-        if self._warmup_thread and self._warmup_thread.is_alive():
-            return
-
-        def work() -> None:
-            try:
-                self.warm_up_transcriber(on_status=on_status)
-            except Exception as exc:
-                tb = traceback.format_exc()
-                logging.getLogger("aura").error(
-                    "STT model warmup failed: %s\n%s", exc, tb
-                )
+        with self._warmup_lock:
+            transcriber = self.transcriber
+            generation = self._warmup_generation
+            if transcriber.is_ready:
                 if on_status:
-                    on_status(f"{self.transcriber.name} 模型加载失败: {exc}")
+                    on_status(f"{transcriber.name} 模型已就绪")
+                return
+            if self._warmup_thread and self._warmup_thread.is_alive():
+                return
 
-        self._warmup_thread = threading.Thread(target=work, daemon=True)
-        self._warmup_thread.start()
+            def report_status(message: str) -> None:
+                with self._warmup_lock:
+                    if generation != self._warmup_generation or transcriber is not self.transcriber:
+                        return
+                if on_status:
+                    on_status(message)
+
+            def work() -> None:
+                try:
+                    transcriber.load_model(status_callback=report_status)
+                except Exception as exc:
+                    tb = traceback.format_exc()
+                    logging.getLogger("aura").error(
+                        "STT model warmup failed: %s\n%s", exc, tb
+                    )
+                    report_status(f"{transcriber.name} 模型加载失败: {exc}")
+
+            self._warmup_thread = threading.Thread(target=work, daemon=True)
+            self._warmup_thread.start()
 
     def transcribe(self, wav_path: Path, on_status: TextCallback | None = None) -> str:
         return self.transcriber.transcribe(wav_path, status_callback=on_status)

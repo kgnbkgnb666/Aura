@@ -11,6 +11,7 @@ from aura.providers.stt.model_cache import (
     resolve_modelscope_alias,
     resolve_modelscope_model,
 )
+from aura.providers.stt.whisper_large_v3 import _is_cuda_library_error
 
 
 def test_modes_load():
@@ -22,6 +23,12 @@ def test_modes_load():
     assert modes.get("concise").id == "coding_agent"
     assert modes.get("professional").id == "coding_agent"
     assert modes.get("missing-mode").id in ids
+
+
+def test_whisper_cuda_library_errors_are_detected_for_cpu_fallback():
+    assert _is_cuda_library_error(RuntimeError("Library cublas64_12.dll is not found"))
+    assert _is_cuda_library_error(RuntimeError("Could not load cudnn_ops64_9.dll"))
+    assert not _is_cuda_library_error(RuntimeError("audio file is invalid"))
 
 
 def test_builtin_standard_mode_has_universal_quality_contract():

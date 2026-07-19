@@ -443,7 +443,7 @@ class AuraSidecar:
                 else "sensevoice-small"
             )
             if settings.model_cache_dir != previous_cache_dir or settings.stt_provider != previous_provider:
-                self.service.transcriber = self.service._build_transcriber()
+                self.service.replace_transcriber()
                 self.service.warm_up_transcriber_background(on_status=self.set_status)
             self.settings_store.save(settings)
             self.latest_status = "语音设置已保存"
