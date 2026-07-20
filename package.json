@@ -9,15 +9,19 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "npm run build:sidecar && tauri build",
-    "build:sidecar": "pyinstaller --onefile --name aura-sidecar-x86_64-pc-windows-msvc --distpath src-tauri/binaries --workpath build/pyinstaller --specpath build --collect-data funasr --collect-data modelscope --collect-all faster_whisper aura/sidecar_entry.py"
+    "tauri:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1",
+    "build:sidecar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "i18next": "^26.3.6",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.10"
   },
   "devDependencies": {
     "@rolldown/plugin-babel": "^0.2.3",

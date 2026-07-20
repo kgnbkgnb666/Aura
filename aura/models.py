@@ -24,6 +24,10 @@ class Mode:
     description: str
     system_prompt: str
     output_hint: str = ""
+    source: str = "custom"
+    enabled: bool = True
+    icon: str = "sparkles"
+    base_mode_id: str = ""
 
 
 @dataclass(slots=True)
@@ -50,9 +54,11 @@ class Settings:
     stt_provider: str = "sensevoice-small"
     model_cache_dir: Path | None = None
     ui_theme: str = "morning"
+    ui_language: str = "zh-CN"
     llm_provider: str = "deepseek"
     llm_base_url: str = "https://api.deepseek.com"
-    llm_api_key: str = ""
+    deepseek_api_key: str = ""
+    custom_api_key: str = ""
     llm_model: str = "deepseek-v4-flash"
     llm_thinking_enabled: bool = False
     llm_temperature: float = 0.2
@@ -137,6 +143,7 @@ class CompileRequest:
     previous_compiled_text: str = ""
     previous_transcripts: list[str] = field(default_factory=list)
     user_preferences: str = ""
+    output_language: str = "zh-CN"
     skills: list[Skill] = field(default_factory=list)
     merge_output: bool = True
 
@@ -150,6 +157,19 @@ class CompileRequest:
             "输出范围由 merge_output 决定：true 时，必须把本次需求与本会话之前的需求合并，"
             "输出一份没有遗漏、可独立使用的完整提示词；false 时，历史只用于理解指代和上下文，"
             "最终提示词只能表达本次新增需求，不得重复或合并旧需求。"
+        )
+        language_names = {
+            "zh-CN": "简体中文",
+            "zh-TW": "繁體中文",
+            "en": "English",
+            "ja": "日本語",
+        }
+        output_language_name = language_names.get(self.output_language, "简体中文")
+        system_prompt = (
+            f"{system_prompt}\n\n"
+            f"输出语言要求：最终提示词必须使用{output_language_name}。"
+            "即使输入证据使用其他语言，也要将最终输出转换为指定语言；"
+            "代码、命令、路径、API 名称和专有名词保持原样。"
         )
         if enabled_skills:
             system_prompt = (
@@ -167,6 +187,7 @@ class CompileRequest:
             "previous_compiled_prompt": self.previous_compiled_text,
             "merge_output": self.merge_output,
             "user_preferences": self.user_preferences,
+            "output_language": self.output_language,
             "available_skills": [
                 {
                     "name": skill.name,

@@ -1,0 +1,122 @@
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+
+export type UiLanguage = "zh-CN" | "zh-TW" | "en" | "ja";
+
+export const UI_LANGUAGES: Array<{ value: UiLanguage; label: string }> = [
+  { value: "zh-CN", label: "简体中文" },
+  { value: "zh-TW", label: "繁體中文" },
+  { value: "en", label: "English" },
+  { value: "ja", label: "日本語" }
+];
+
+const zhCN = {
+  common: { back: "返回", add: "添加", save: "保存", delete: "删除", refresh: "刷新", clear: "清空", edit: "编辑", done: "完成", copy: "复制", copied: "已复制", default: "默认", noContent: "无内容" },
+  boot: { connecting: "正在连接 Aura sidecar", starting: "正在启动 Aura", failed: "启动失败", startingSpeech: "正在准备语音识别模型", speechReady: "语音识别模型已就绪", checkingSpeech: "正在检查本地语音模型", loadingSpeech: "正在加载语音识别模型", speechFailed: "语音识别模型加载失败", incomplete: "启动未完成，请根据上方信息检查配置", downloading: "模型正在下载 · 已等待 {{seconds}} 秒 · 下载速度取决于网络", working: "{{progress}}% · 已等待 {{seconds}} 秒 · 后台仍在工作", progress: "STT 模型加载进度", loading: "启动中" },
+  tabs: { general: "通用", speech: "语音", llm: "LLM", modes: "模式", skills: "Skill 配置", shortcuts: "快捷键", logs: "日志", history: "历史" },
+  main: { currentMode: "当前模式", historySessions: "历史会话", newSession: "新会话", settings: "设置", rawTranscript: "原始转录", editTranscript: "编辑原始转录", finishEdit: "完成编辑", compiled: "AI 编译结果", editCompiled: "编辑 AI 编译结果", mergeOutput: "合并需求输出", mergeOn: "已开启：合并本会话的全部需求", mergeOff: "已关闭：只输出本次新需求", speechLoading: "语音模型仍在加载，完成后即可按住空格录音", speechNotReady: "语音识别模型尚未就绪，请稍候再录音。", busy: "上一段录音仍在处理中，请完成后再录音。", oldSidecar: "Aura sidecar 协议过旧，请重启应用。", organized: "整理完成" },
+  speech: { model: "语音识别模型", sensevoice: "SenseVoice Small（轻量快速）", whisper: "Whisper Large V3（高精度）", whisperNote: "首次选择后自动下载约 3 GB 模型；支持 NVIDIA GPU，CPU 也可运行但速度较慢。", sensevoiceNote: "首次使用时自动下载，体积较小，适合中文实时输入。", microphone: "麦克风", defaultInput: "默认输入设备", defaultSuffix: " 默认", cacheDir: "模型缓存目录", testMic: "测试麦克风", testTranscription: "测试转录", preload: "预加载模型", preloading: "正在加载模型...", modelProgress: "模型加载进度", result: "测试转录结果", noResult: "未识别到内容", duration: "时长: {{duration}}s\n平均音量: {{average}}\n最大音量: {{maximum}}", preloadError: "预加载模型失败" },
+  modes: { addMode: "添加模式", defaultMode: "默认模式", name: "模式名称", description: "描述", saveMode: "保存模式", defaultPrompt: "请将用户的语音转录整理成清晰、可执行的提示词。", official: "官方模式", custom: "自定义模式", officialNote: "官方内容由项目维护；编辑后会另存为本地私人副本。", customNote: "私人资产保存在本机，不会上传到 Git。", enabled: "已启用", disabled: "未启用", atLeastOne: "至少启用一个模式后才能保存。", savePrivate: "保存为私人副本", customEmpty: "暂无自定义模式", privateCopy: "官方模式的私人副本", moveUp: "上移", moveDown: "下移", newCustomName: "新自定义模式" },
+  modePresets: { action: { name: "行动", description: "目标明确，需要直接完成、交付并验证的任务" }, decision: { name: "决策", description: "需要比较选项、检验假设并形成判断的问题" }, creative: { name: "创作", description: "需要面向受众产出有辨识度表达的创意任务" } },
+  skills: { directory: "Skill 目录", chooseFolder: "选择文件夹", chooseTitle: "选择 Skill 目录", hint: "AI 会结合 Skill 的名称、描述和使用示例自动判断；匹配时引用，未匹配时不会添加。", extract: "自动提取", addManual: "手动添加", empty: "暂无 Skill，请选择目录自动提取，或手动添加。", name: "名称", category: "分类", description: "描述", example: "使用示例", examplePlaceholder: "例如：当用户要求制作演示文稿时使用", saveSkill: "保存 Skill", selectError: "无法选择文件夹" },
+  general: { language: "界面语言", style: "界面风格", morning: "晨光", night: "静夜", autoCopy: "自动复制", autoLaunch: "开机自启动", saveHistory: "保存历史", about: "关于", currentVersion: "当前版本", github: "GitHub", checkUpdates: "检查更新", checking: "正在检查...", latest: "已是最新版本", available: "发现新版本 {{version}}", updateError: "检查更新失败", openRelease: "查看新版" },
+  llm: { source: "大模型来源", custom: "自定义接口", endpoint: "API 端点", modelName: "模型名称", modelPlaceholder: "服务提供的模型 ID", customKey: "自定义接口 API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "输入自定义接口 API Key；本地服务可留空", deepseekKeyPlaceholder: "输入 DeepSeek API Key", keySaved: "密钥保存在 config.local.json；清空并保存可删除。", keyUnsaved: "保存后将写入本机 config.local.json。该文件已被 Git 忽略，请勿手动分享。", thinking: "思考模式", thinkingNote: "默认关闭；开启后会提高复杂任务质量，但响应更慢。", customNote: "支持 OpenAI-compatible 接口，包括用户自建服务、Ollama、vLLM 或第三方网关。", save: "保存 LLM" },
+  shortcuts: { focus: "唤起并聚焦 Aura", record: "Aura 主界面聚焦时按住录音，松开后转录", newSession: "新建会话", hide: "隐藏 Aura" },
+  logs: { empty: "暂无日志" },
+  history: { clear: "清空历史", empty: "暂无历史", deleteTitle: "删除这条历史记录", confirmDelete: "删除这条历史记录？此操作无法撤销。" }
+};
+
+const zhTW = {
+  common: { back: "返回", add: "新增", save: "儲存", delete: "刪除", refresh: "重新整理", clear: "清除", edit: "編輯", done: "完成", copy: "複製", copied: "已複製", default: "預設", noContent: "無內容" },
+  boot: { connecting: "正在連線 Aura sidecar", starting: "正在啟動 Aura", failed: "啟動失敗", startingSpeech: "正在準備語音辨識模型", speechReady: "語音辨識模型已就緒", checkingSpeech: "正在檢查本機語音模型", loadingSpeech: "正在載入語音辨識模型", speechFailed: "語音辨識模型載入失敗", incomplete: "啟動未完成，請依照上方資訊檢查設定", downloading: "模型正在下載 · 已等待 {{seconds}} 秒 · 下載速度取決於網路", working: "{{progress}}% · 已等待 {{seconds}} 秒 · 背景仍在處理", progress: "STT 模型載入進度", loading: "啟動中" },
+  tabs: { general: "一般", speech: "語音", llm: "LLM", modes: "模式", skills: "Skill 設定", shortcuts: "快捷鍵", logs: "日誌", history: "歷史" },
+  main: { currentMode: "目前模式", historySessions: "歷史工作階段", newSession: "新增工作階段", settings: "設定", rawTranscript: "原始轉錄", editTranscript: "編輯原始轉錄", finishEdit: "完成編輯", compiled: "AI 編譯結果", editCompiled: "編輯 AI 編譯結果", mergeOutput: "合併需求輸出", mergeOn: "已開啟：合併此工作階段的全部需求", mergeOff: "已關閉：只輸出本次新需求", speechLoading: "語音模型仍在載入，完成後即可按住空白鍵錄音", speechNotReady: "語音辨識模型尚未就緒，請稍候再錄音。", busy: "上一段錄音仍在處理中，請完成後再錄音。", oldSidecar: "Aura sidecar 通訊協定過舊，請重新啟動應用程式。", organized: "整理完成" },
+  speech: { model: "語音辨識模型", sensevoice: "SenseVoice Small（輕量快速）", whisper: "Whisper Large V3（高精度）", whisperNote: "首次選擇後會自動下載約 3 GB 模型；支援 NVIDIA GPU，CPU 也可執行但速度較慢。", sensevoiceNote: "首次使用時自動下載，體積較小，適合中文即時輸入。", microphone: "麥克風", defaultInput: "預設輸入裝置", defaultSuffix: " 預設", cacheDir: "模型快取目錄", testMic: "測試麥克風", testTranscription: "測試轉錄", preload: "預先載入模型", preloading: "正在載入模型...", modelProgress: "模型載入進度", result: "測試轉錄結果", noResult: "未辨識到內容", duration: "時長: {{duration}}s\n平均音量: {{average}}\n最大音量: {{maximum}}", preloadError: "預先載入模型失敗" },
+  modes: { addMode: "新增模式", defaultMode: "預設模式", name: "模式名稱", description: "描述", saveMode: "儲存模式", defaultPrompt: "請將使用者的語音轉錄整理成清晰、可執行的提示詞。", official: "官方模式", custom: "自訂模式", officialNote: "官方內容由專案維護；編輯後會另存為本機私人副本。", customNote: "私人資產儲存在本機，不會上傳至 Git。", enabled: "已啟用", disabled: "未啟用", atLeastOne: "至少啟用一個模式後才能儲存。", savePrivate: "儲存為私人副本", customEmpty: "暫無自訂模式", privateCopy: "官方模式的私人副本", moveUp: "上移", moveDown: "下移", newCustomName: "新自訂模式" },
+  modePresets: { action: { name: "行動", description: "目標明確，需要直接完成、交付並驗證的任務" }, decision: { name: "決策", description: "需要比較選項、檢驗假設並形成判斷的問題" }, creative: { name: "創作", description: "需要面向受眾產出有辨識度表達的創意任務" } },
+  skills: { directory: "Skill 目錄", chooseFolder: "選擇資料夾", chooseTitle: "選擇 Skill 目錄", hint: "AI 會依據 Skill 的名稱、描述與使用範例自動判斷；符合時引用，不符合時不會加入。", extract: "自動擷取", addManual: "手動新增", empty: "暫無 Skill，請選擇目錄自動擷取，或手動新增。", name: "名稱", category: "分類", description: "描述", example: "使用範例", examplePlaceholder: "例如：當使用者要求製作簡報時使用", saveSkill: "儲存 Skill", selectError: "無法選擇資料夾" },
+  general: { language: "介面語言", style: "介面風格", morning: "晨光", night: "靜夜", autoCopy: "自動複製", autoLaunch: "開機自動啟動", saveHistory: "儲存歷史", about: "關於", currentVersion: "目前版本", github: "GitHub", checkUpdates: "檢查更新", checking: "正在檢查...", latest: "目前已是最新版本", available: "發現新版本 {{version}}", updateError: "檢查更新失敗", openRelease: "查看新版" },
+  llm: { source: "大型語言模型來源", custom: "自訂介面", endpoint: "API 端點", modelName: "模型名稱", modelPlaceholder: "服務提供的模型 ID", customKey: "自訂介面 API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "輸入自訂介面 API Key；本機服務可留空", deepseekKeyPlaceholder: "輸入 DeepSeek API Key", keySaved: "密鑰儲存在 config.local.json；清空並儲存即可刪除。", keyUnsaved: "儲存後將寫入本機 config.local.json。此檔案已被 Git 忽略，請勿分享。", thinking: "思考模式", thinkingNote: "預設關閉；開啟後可提升複雜任務品質，但回應較慢。", customNote: "支援 OpenAI-compatible 介面，包括自建服務、Ollama、vLLM 或第三方閘道。", save: "儲存 LLM" },
+  shortcuts: { focus: "喚起並聚焦 Aura", record: "Aura 主介面聚焦時按住錄音，放開後轉錄", newSession: "新增工作階段", hide: "隱藏 Aura" },
+  logs: { empty: "暫無日誌" },
+  history: { clear: "清除歷史", empty: "暫無歷史", deleteTitle: "刪除此筆歷史", confirmDelete: "刪除此筆歷史記錄？此操作無法復原。" }
+};
+
+const en = {
+  common: { back: "Back", add: "Add", save: "Save", delete: "Delete", refresh: "Refresh", clear: "Clear", edit: "Edit", done: "Done", copy: "Copy", copied: "Copied", default: "Default", noContent: "No content" },
+  boot: { connecting: "Connecting to Aura sidecar", starting: "Starting Aura", failed: "Startup failed", startingSpeech: "Preparing speech recognition", speechReady: "Speech recognition is ready", checkingSpeech: "Checking local speech model", loadingSpeech: "Loading speech recognition model", speechFailed: "Failed to load speech recognition model", incomplete: "Startup did not complete. Check the configuration above.", downloading: "Downloading model · {{seconds}}s elapsed · Speed depends on your network", working: "{{progress}}% · {{seconds}}s elapsed · Still working in the background", progress: "STT model loading progress", loading: "Starting" },
+  tabs: { general: "General", speech: "Speech", llm: "LLM", modes: "Modes", skills: "Skill settings", shortcuts: "Shortcuts", logs: "Logs", history: "History" },
+  main: { currentMode: "Current mode", historySessions: "Session history", newSession: "New session", settings: "Settings", rawTranscript: "Raw transcript", editTranscript: "Edit raw transcript", finishEdit: "Finish editing", compiled: "AI compiled result", editCompiled: "Edit AI compiled result", mergeOutput: "Merge request output", mergeOn: "On: merge every request in this session", mergeOff: "Off: output only the latest request", speechLoading: "The speech model is still loading. Hold Space to record when it is ready.", speechNotReady: "Speech recognition is not ready yet. Try recording again shortly.", busy: "The previous recording is still being processed.", oldSidecar: "The Aura sidecar protocol is outdated. Restart the app.", organized: "Ready" },
+  speech: { model: "Speech recognition model", sensevoice: "SenseVoice Small (fast and lightweight)", whisper: "Whisper Large V3 (high accuracy)", whisperNote: "Downloads about 3 GB when first selected. Supports NVIDIA GPUs; CPU mode is available but slower.", sensevoiceNote: "Downloads automatically on first use. Small and suitable for real-time Chinese input.", microphone: "Microphone", defaultInput: "Default input device", defaultSuffix: " Default", cacheDir: "Model cache directory", testMic: "Test microphone", testTranscription: "Test transcription", preload: "Preload model", preloading: "Loading model...", modelProgress: "Model loading progress", result: "Test transcription result", noResult: "No speech recognized", duration: "Duration: {{duration}}s\nAverage volume: {{average}}\nPeak volume: {{maximum}}", preloadError: "Model preload failed" },
+  modes: { addMode: "Add mode", defaultMode: "Default mode", name: "Mode name", description: "Description", saveMode: "Save mode", defaultPrompt: "Turn the user's speech transcript into a clear, actionable prompt.", official: "Official modes", custom: "Custom modes", officialNote: "Maintained by the project. Editing creates a private local copy.", customNote: "Private assets stay on this device and are not uploaded to Git.", enabled: "Enabled", disabled: "Disabled", atLeastOne: "Enable at least one mode before saving.", savePrivate: "Save as private copy", customEmpty: "No custom modes", privateCopy: "Private copy of an official mode", moveUp: "Move up", moveDown: "Move down", newCustomName: "New custom mode" },
+  modePresets: { action: { name: "Act", description: "Clear outcomes that should be completed, delivered, and verified" }, decision: { name: "Decide", description: "Questions that require comparing options, testing assumptions, and making a judgment" }, creative: { name: "Create", description: "Creative work that needs distinctive expression for a specific audience" } },
+  skills: { directory: "Skill directory", chooseFolder: "Choose folder", chooseTitle: "Choose a Skill directory", hint: "AI matches Skills by name, description, and examples. Matching Skills are referenced; unrelated Skills are omitted.", extract: "Scan folder", addManual: "Add manually", empty: "No Skills yet. Choose a folder to scan or add one manually.", name: "Name", category: "Category", description: "Description", example: "Usage example", examplePlaceholder: "Example: use when the user asks for a presentation", saveSkill: "Save Skill", selectError: "Could not choose a folder" },
+  general: { language: "Interface language", style: "Appearance", morning: "Morning", night: "Night", autoCopy: "Copy automatically", autoLaunch: "Launch at startup", saveHistory: "Save history", about: "About", currentVersion: "Current version", github: "GitHub", checkUpdates: "Check for updates", checking: "Checking...", latest: "You're up to date", available: "Version {{version}} is available", updateError: "Could not check for updates", openRelease: "View release" },
+  llm: { source: "Model provider", custom: "Custom endpoint", endpoint: "API endpoint", modelName: "Model name", modelPlaceholder: "Model ID provided by the service", customKey: "Custom endpoint API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "Enter an API Key; leave blank for local services", deepseekKeyPlaceholder: "Enter your DeepSeek API Key", keySaved: "Stored in config.local.json. Clear and save to delete it.", keyUnsaved: "Saving writes the key to local config.local.json. The file is ignored by Git; do not share it.", thinking: "Thinking mode", thinkingNote: "Off by default. Improves complex tasks but responds more slowly.", customNote: "Supports OpenAI-compatible services, including self-hosted endpoints, Ollama, vLLM, and gateways.", save: "Save LLM" },
+  shortcuts: { focus: "Show and focus Aura", record: "Hold to record while Aura is focused; release to transcribe", newSession: "New session", hide: "Hide Aura" },
+  logs: { empty: "No logs" },
+  history: { clear: "Clear history", empty: "No history", deleteTitle: "Delete this history item", confirmDelete: "Delete this history item? This cannot be undone." }
+};
+
+const ja = {
+  common: { back: "戻る", add: "追加", save: "保存", delete: "削除", refresh: "更新", clear: "クリア", edit: "編集", done: "完了", copy: "コピー", copied: "コピー済み", default: "デフォルト", noContent: "内容なし" },
+  boot: { connecting: "Aura sidecar に接続中", starting: "Aura を起動中", failed: "起動に失敗しました", startingSpeech: "音声認識モデルを準備中", speechReady: "音声認識モデルの準備ができました", checkingSpeech: "ローカル音声モデルを確認中", loadingSpeech: "音声認識モデルを読み込み中", speechFailed: "音声認識モデルの読み込みに失敗しました", incomplete: "起動が完了しませんでした。上の設定を確認してください。", downloading: "モデルをダウンロード中 · {{seconds}} 秒経過 · 速度はネットワークに依存します", working: "{{progress}}% · {{seconds}} 秒経過 · バックグラウンドで処理中", progress: "STT モデル読み込み進捗", loading: "起動中" },
+  tabs: { general: "一般", speech: "音声", llm: "LLM", modes: "モード", skills: "Skill 設定", shortcuts: "ショートカット", logs: "ログ", history: "履歴" },
+  main: { currentMode: "現在のモード", historySessions: "セッション履歴", newSession: "新しいセッション", settings: "設定", rawTranscript: "元の文字起こし", editTranscript: "文字起こしを編集", finishEdit: "編集を完了", compiled: "AI 整理結果", editCompiled: "AI 整理結果を編集", mergeOutput: "要件を統合して出力", mergeOn: "オン：このセッションの要件をすべて統合", mergeOff: "オフ：今回の新しい要件のみ出力", speechLoading: "音声モデルを読み込み中です。準備後に Space を押し続けて録音できます。", speechNotReady: "音声認識モデルの準備ができていません。しばらくしてから録音してください。", busy: "前の録音を処理中です。完了するまでお待ちください。", oldSidecar: "Aura sidecar のプロトコルが古いため、アプリを再起動してください。", organized: "整理完了" },
+  speech: { model: "音声認識モデル", sensevoice: "SenseVoice Small（軽量・高速）", whisper: "Whisper Large V3（高精度）", whisperNote: "初回選択時に約 3 GB をダウンロードします。NVIDIA GPU 対応。CPU でも動作しますが低速です。", sensevoiceNote: "初回使用時に自動ダウンロードします。軽量で、中国語のリアルタイム入力に適しています。", microphone: "マイク", defaultInput: "デフォルト入力デバイス", defaultSuffix: " デフォルト", cacheDir: "モデルキャッシュフォルダー", testMic: "マイクをテスト", testTranscription: "文字起こしをテスト", preload: "モデルを事前読み込み", preloading: "モデルを読み込み中...", modelProgress: "モデル読み込み進捗", result: "テスト文字起こし結果", noResult: "音声を認識できませんでした", duration: "時間: {{duration}}秒\n平均音量: {{average}}\n最大音量: {{maximum}}", preloadError: "モデルの事前読み込みに失敗しました" },
+  modes: { addMode: "モードを追加", defaultMode: "デフォルトモード", name: "モード名", description: "説明", saveMode: "モードを保存", defaultPrompt: "ユーザーの音声文字起こしを、明確で実行可能なプロンプトに整理してください。", official: "公式モード", custom: "カスタムモード", officialNote: "プロジェクト管理の内容です。編集するとローカルの非公開コピーとして保存されます。", customNote: "非公開アセットはこの端末に保存され、Git にはアップロードされません。", enabled: "有効", disabled: "無効", atLeastOne: "保存するには少なくとも一つのモードを有効にしてください。", savePrivate: "非公開コピーとして保存", customEmpty: "カスタムモードはありません", privateCopy: "公式モードの非公開コピー", moveUp: "上へ", moveDown: "下へ", newCustomName: "新しいカスタムモード" },
+  modePresets: { action: { name: "実行", description: "明確な成果を完了し、納品して検証するタスク" }, decision: { name: "意思決定", description: "選択肢を比較し、仮定を検証して判断する課題" }, creative: { name: "創作", description: "対象者に向けた独自性のある表現を生み出すタスク" } },
+  skills: { directory: "Skill フォルダー", chooseFolder: "フォルダーを選択", chooseTitle: "Skill フォルダーを選択", hint: "AI は Skill の名前、説明、使用例から自動判定します。一致する Skill のみ参照します。", extract: "自動取得", addManual: "手動で追加", empty: "Skill がありません。フォルダーを選択して取得するか、手動で追加してください。", name: "名前", category: "カテゴリー", description: "説明", example: "使用例", examplePlaceholder: "例：ユーザーがプレゼン資料を求めたときに使用", saveSkill: "Skill を保存", selectError: "フォルダーを選択できませんでした" },
+  general: { language: "表示言語", style: "外観", morning: "モーニング", night: "ナイト", autoCopy: "自動コピー", autoLaunch: "スタートアップ時に起動", saveHistory: "履歴を保存", about: "情報", currentVersion: "現在のバージョン", github: "GitHub", checkUpdates: "更新を確認", checking: "確認中...", latest: "最新バージョンです", available: "新しいバージョン {{version}} があります", updateError: "更新を確認できませんでした", openRelease: "新しいリリースを見る" },
+  llm: { source: "モデルプロバイダー", custom: "カスタム API", endpoint: "API エンドポイント", modelName: "モデル名", modelPlaceholder: "サービスが提供するモデル ID", customKey: "カスタム API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "API Key を入力。ローカルサービスは空欄可", deepseekKeyPlaceholder: "DeepSeek API Key を入力", keySaved: "config.local.json に保存されています。空にして保存すると削除できます。", keyUnsaved: "保存するとローカルの config.local.json に書き込まれます。このファイルは Git の対象外です。共有しないでください。", thinking: "思考モード", thinkingNote: "デフォルトはオフです。複雑なタスクの品質が向上しますが、応答は遅くなります。", customNote: "セルフホスト、Ollama、vLLM、各種ゲートウェイなど OpenAI 互換 API に対応します。", save: "LLM を保存" },
+  shortcuts: { focus: "Aura を表示してフォーカス", record: "Aura にフォーカス中、押し続けて録音し、離すと文字起こし", newSession: "新しいセッション", hide: "Aura を隠す" },
+  logs: { empty: "ログはありません" },
+  history: { clear: "履歴をクリア", empty: "履歴はありません", deleteTitle: "この履歴を削除", confirmDelete: "この履歴を削除しますか？元に戻せません。" }
+};
+
+Object.assign(zhCN, { runtime: { ready: "准备就绪", recording: "正在录音", recordingLevel: "录音中 {{volume}}", transcribing: "正在转录", organizing: "正在整理", copied: "已复制", organized: "整理完成", newSession: "新会话", mergeOn: "合并需求输出已开启", mergeOff: "仅输出本次需求", settingsSaved: "设置已保存", speechSaved: "语音设置已保存", llmSaved: "LLM 设置已保存", skillsSaved: "Skill 配置已保存", preloading: "正在预加载转录模型", micTesting: "正在测试麦克风", micDone: "麦克风测试完成", testTranscribing: "正在转录测试音频", testDone: "测试转录完成", recompiled: "重新编译完成", historyCleared: "历史已清空", historyDeleted: "历史记录已删除", extracted: "已提取 {{count}} 个 Skill", mode: "模式: {{name}}", defaultMode: "默认模式: {{name}}", historyLoaded: "已切换历史: {{name}}", sensevoiceReady: "SenseVoice-Small 模型已就绪", sensevoiceUsing: "正在使用 SenseVoice-Small 识别语音", whisperUsing: "正在使用 Whisper Large V3 识别语音", cudaFallback: "CUDA 运行库不完整，已自动切换到 CPU 模式" } });
+Object.assign(zhTW, { runtime: { ready: "準備就緒", recording: "正在錄音", recordingLevel: "錄音中 {{volume}}", transcribing: "正在轉錄", organizing: "正在整理", copied: "已複製", organized: "整理完成", newSession: "新增工作階段", mergeOn: "已開啟合併需求輸出", mergeOff: "僅輸出本次需求", settingsSaved: "設定已儲存", speechSaved: "語音設定已儲存", llmSaved: "LLM 設定已儲存", skillsSaved: "Skill 設定已儲存", preloading: "正在預先載入轉錄模型", micTesting: "正在測試麥克風", micDone: "麥克風測試完成", testTranscribing: "正在轉錄測試音訊", testDone: "測試轉錄完成", recompiled: "重新編譯完成", historyCleared: "歷史已清除", historyDeleted: "歷史記錄已刪除", extracted: "已擷取 {{count}} 個 Skill", mode: "模式: {{name}}", defaultMode: "預設模式: {{name}}", historyLoaded: "已切換歷史: {{name}}", sensevoiceReady: "SenseVoice-Small 模型已就緒", sensevoiceUsing: "正在使用 SenseVoice-Small 辨識語音", whisperUsing: "正在使用 Whisper Large V3 辨識語音", cudaFallback: "CUDA 執行環境不完整，已自動切換至 CPU 模式" } });
+Object.assign(en, { runtime: { ready: "Ready", recording: "Recording", recordingLevel: "Recording {{volume}}", transcribing: "Transcribing", organizing: "Organizing", copied: "Copied", organized: "Ready", newSession: "New session", mergeOn: "Merge request output enabled", mergeOff: "Output only the latest request", settingsSaved: "Settings saved", speechSaved: "Speech settings saved", llmSaved: "LLM settings saved", skillsSaved: "Skill settings saved", preloading: "Preloading speech model", micTesting: "Testing microphone", micDone: "Microphone test complete", testTranscribing: "Transcribing test audio", testDone: "Test transcription complete", recompiled: "Recompile complete", historyCleared: "History cleared", historyDeleted: "History item deleted", extracted: "Extracted {{count}} Skills", mode: "Mode: {{name}}", defaultMode: "Default mode: {{name}}", historyLoaded: "Loaded history: {{name}}", sensevoiceReady: "SenseVoice-Small is ready", sensevoiceUsing: "Recognizing speech with SenseVoice-Small", whisperUsing: "Recognizing speech with Whisper Large V3", cudaFallback: "CUDA runtime is incomplete; switched to CPU mode" } });
+Object.assign(ja, { runtime: { ready: "準備完了", recording: "録音中", recordingLevel: "録音中 {{volume}}", transcribing: "文字起こし中", organizing: "整理中", copied: "コピー済み", organized: "整理完了", newSession: "新しいセッション", mergeOn: "要件の統合出力をオンにしました", mergeOff: "今回の要件のみ出力します", settingsSaved: "設定を保存しました", speechSaved: "音声設定を保存しました", llmSaved: "LLM 設定を保存しました", skillsSaved: "Skill 設定を保存しました", preloading: "音声モデルを事前読み込み中", micTesting: "マイクをテスト中", micDone: "マイクテスト完了", testTranscribing: "テスト音声を文字起こし中", testDone: "テスト文字起こし完了", recompiled: "再整理が完了しました", historyCleared: "履歴をクリアしました", historyDeleted: "履歴を削除しました", extracted: "{{count}} 個の Skill を取得しました", mode: "モード: {{name}}", defaultMode: "デフォルトモード: {{name}}", historyLoaded: "履歴を読み込みました: {{name}}", sensevoiceReady: "SenseVoice-Small の準備ができました", sensevoiceUsing: "SenseVoice-Small で音声認識中", whisperUsing: "Whisper Large V3 で音声認識中", cudaFallback: "CUDA ランタイムが不完全なため CPU モードに切り替えました" } });
+
+Object.assign(zhCN.history, { turns: "{{count}} 轮" });
+Object.assign(zhTW.history, { turns: "{{count}} 輪" });
+Object.assign(en.history, { turns: "{{count}} turns" });
+Object.assign(ja.history, { turns: "{{count}} ターン" });
+Object.assign(zhCN.general, { noRelease: "暂无已发布的正式版本" });
+Object.assign(zhTW.general, { noRelease: "暫無已發布的正式版本" });
+Object.assign(en.general, { noRelease: "No published release is available yet" });
+Object.assign(ja.general, { noRelease: "公開済みの正式バージョンはまだありません" });
+
+export function storedLanguage(): UiLanguage {
+  const stored = window.localStorage.getItem("aura-ui-language");
+  if (stored === "zh-CN" || stored === "zh-TW" || stored === "en" || stored === "ja") return stored;
+  const browser = navigator.language.toLowerCase();
+  if (browser.startsWith("zh-tw") || browser.startsWith("zh-hk")) return "zh-TW";
+  if (browser.startsWith("ja")) return "ja";
+  if (browser.startsWith("en")) return "en";
+  return "zh-CN";
+}
+
+export async function setUiLanguage(language: UiLanguage): Promise<void> {
+  window.localStorage.setItem("aura-ui-language", language);
+  document.documentElement.lang = language;
+  await i18n.changeLanguage(language);
+}
+
+const initialLanguage = storedLanguage();
+document.documentElement.lang = initialLanguage;
+
+void i18n.use(initReactI18next).init({
+  resources: {
+    "zh-CN": { translation: zhCN },
+    "zh-TW": { translation: zhTW },
+    en: { translation: en },
+    ja: { translation: ja }
+  },
+  lng: initialLanguage,
+  fallbackLng: "zh-CN",
+  interpolation: { escapeValue: false }
+});
+
+export default i18n;

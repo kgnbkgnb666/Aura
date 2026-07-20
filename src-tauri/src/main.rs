@@ -208,6 +208,40 @@ fn spawn_sidecar(port: u16, token: &str) -> Result<Child, String> {
         }
     }
 
+    // Development default: prefer the dedicated "aura" environment over a
+    // base Conda interpreter inherited from the terminal.
+    #[cfg(all(target_os = "windows", debug_assertions))]
+    {
+        let mut candidates = Vec::new();
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            candidates.push(
+                PathBuf::from(profile)
+                    .join(".conda")
+                    .join("envs")
+                    .join("aura")
+                    .join("python.exe"),
+            );
+        }
+        if let Ok(prefix) = std::env::var("CONDA_PREFIX") {
+            let prefix = PathBuf::from(prefix);
+            if prefix.file_name().and_then(|name| name.to_str()) == Some("aura") {
+                candidates.push(prefix.join("python.exe"));
+            } else {
+                candidates.push(prefix.join("envs").join("aura").join("python.exe"));
+            }
+        }
+        candidates.push(project_root().join(".venv").join("Scripts").join("python.exe"));
+
+        for program in candidates {
+            if program.exists() {
+                let program = program.to_string_lossy().to_string();
+                if let Ok(child) = spawn_with(&program, &[], port, token) {
+                    return Ok(child);
+                }
+            }
+        }
+    }
+
     // Priority 2 (release): bundled sidecar exe next to Aura.exe
     #[cfg(not(debug_assertions))]
     {
@@ -375,9 +409,41 @@ fn hide_window(app: tauri::AppHandle) -> Result<(), String> {
     hide_main_window(&app)
 }
 
+fn tray_labels(language: &str) -> (&'static str, &'static str) {
+    match language {
+        "zh-TW" => ("顯示 / 隱藏", "結束 Aura"),
+        "en" => ("Show / Hide", "Quit Aura"),
+        "ja" => ("表示 / 非表示", "Aura を終了"),
+        _ => ("显示 / 隐藏", "退出 Aura"),
+    }
+}
+
+#[tauri::command]
+fn set_tray_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
+    let tray = app
+        .tray_by_id("main")
+        .ok_or_else(|| "Aura tray is unavailable".to_string())?;
+    let (toggle_label, quit_label) = tray_labels(&language);
+    let toggle_item = MenuItemBuilder::with_id("toggle", toggle_label)
+        .build(&app)
+        .map_err(|error| error.to_string())?;
+    let quit_item = MenuItemBuilder::with_id("quit", quit_label)
+        .build(&app)
+        .map_err(|error| error.to_string())?;
+    let menu = MenuBuilder::new(&app)
+        .item(&toggle_item)
+        .separator()
+        .item(&quit_item)
+        .build()
+        .map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -386,7 +452,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             ensure_sidecar,
             toggle_window,
-            hide_window
+            hide_window,
+            set_tray_language
         ])
         .setup(|app| {
             if let Err(error) =
@@ -411,7 +478,7 @@ fn main() {
                 .item(&quit_item)
                 .build()?;
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .menu(&menu)
                 .tooltip("Aura")

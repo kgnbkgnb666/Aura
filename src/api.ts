@@ -8,6 +8,10 @@ export type Mode = {
   description: string;
   system_prompt: string;
   output_hint: string;
+  source: "official" | "custom";
+  enabled: boolean;
+  icon: string;
+  base_mode_id: string;
 };
 
 export type Settings = {
@@ -22,10 +26,13 @@ export type Settings = {
   stt_provider: string;
   model_cache_dir: string | null;
   ui_theme: "morning" | "night";
+  ui_language: "zh-CN" | "zh-TW" | "en" | "ja";
   llm_provider: string;
   llm_base_url: string;
-  llm_api_key: string;
-  llm_api_key_source?: "environment" | "unset";
+  deepseek_api_key: string;
+  custom_api_key: string;
+  deepseek_api_key_source?: "config" | "unset";
+  custom_api_key_source?: "config" | "unset";
   llm_model: string;
   llm_thinking_enabled: boolean;
   llm_temperature: number;
@@ -156,6 +163,10 @@ export async function ensureSidecar(): Promise<void> {
 
 export function hideMainWindow(): Promise<void> {
   return invoke<void>("hide_window");
+}
+
+export function setTrayLanguage(language: Settings["ui_language"]): Promise<void> {
+  return invoke<void>("set_tray_language", { language });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

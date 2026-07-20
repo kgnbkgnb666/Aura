@@ -87,33 +87,32 @@ def test_sidecar_logs_contract(tmp_path):
 def test_sidecar_save_modes_preserves_current_mode(tmp_path):
     app = local_app(tmp_path)
     app.service.modes.modes_dir = tmp_path / "modes"
-    payload = app.save_modes(
+    modes = app.state()["modes"]
+    modes.append(
         {
-            "modes": [
-                {
-                    "id": "reviewer",
-                    "name": "审查模式",
-                    "target": "code_review",
-                    "description": "Review code",
-                    "system_prompt": "Review the transcript as a code review request.",
-                    "output_hint": "review",
-                },
-                {
-                    "id": "coding_agent",
-                    "name": "coding_agent",
-                    "target": "coding_agent",
-                    "description": "Write implementation prompts",
-                    "system_prompt": "Compile the transcript into a coding agent prompt.",
-                    "output_hint": "prompt",
-                },
-            ]
+            "id": "reviewer",
+            "name": "审查模式",
+            "target": "code_review",
+            "description": "Review code",
+            "system_prompt": "Review the transcript as a code review request.",
+            "output_hint": "review",
+            "source": "custom",
+            "enabled": True,
+            "icon": "sparkles",
+            "base_mode_id": "",
         }
     )
+    payload = app.save_modes({"modes": modes})
     state = payload["state"]
-    assert [mode["id"] for mode in state["modes"]] == ["reviewer", "coding_agent"]
+    assert [mode["id"] for mode in state["modes"]] == [
+        "coding_agent",
+        "decision_partner",
+        "creative_studio",
+        "reviewer",
+    ]
     assert state["settings"]["mode_id"] == "coding_agent"
     assert state["current_session"]["mode_id"] == "coding_agent"
-    assert (tmp_path / "modes" / "001-reviewer.yaml").exists()
+    assert (tmp_path / "modes" / "custom" / "001-reviewer.yaml").exists()
 
 
 def test_sidecar_rejects_empty_mode_list(tmp_path):
@@ -334,6 +333,48 @@ def test_sidecar_save_skills_updates_settings(tmp_path):
     assert app.service.settings.skill_scan_dir.endswith("skills")
 
 
+def test_scanning_new_skill_directory_replaces_previous_scanned_results(tmp_path):
+    app = local_app(tmp_path)
+    app.save_skills(
+        {
+            "skill_scan_dir": "",
+            "skills": [
+                {
+                    "id": "manual",
+                    "name": "manual",
+                    "description": "Manually maintained Skill",
+                    "category": "Custom",
+                    "enabled": True,
+                    "source_path": "",
+                }
+            ],
+        }
+    )
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    empty_dir = tmp_path / "empty"
+    (first_dir / "one").mkdir(parents=True)
+    (second_dir / "two").mkdir(parents=True)
+    empty_dir.mkdir()
+    (first_dir / "one" / "SKILL.md").write_text(
+        "# First Skill\nDescription: Imported from the first directory.",
+        encoding="utf-8",
+    )
+    (second_dir / "two" / "SKILL.md").write_text(
+        "# Second Skill\nDescription: Imported from the second directory.",
+        encoding="utf-8",
+    )
+
+    first = app.scan_skills({"directory": str(first_dir)})
+    second = app.scan_skills({"directory": str(second_dir)})
+    empty = app.scan_skills({"directory": str(empty_dir)})
+
+    assert {skill["name"] for skill in first["state"]["skills"]} == {"manual", "First Skill"}
+    assert {skill["name"] for skill in second["state"]["skills"]} == {"manual", "Second Skill"}
+    assert {skill["name"] for skill in empty["state"]["skills"]} == {"manual"}
+    assert empty["state"]["settings"]["skill_scan_dir"] == str(empty_dir)
+
+
 def test_sidecar_saves_keyless_custom_llm_configuration(tmp_path):
     app = local_app(tmp_path)
 
@@ -342,14 +383,14 @@ def test_sidecar_saves_keyless_custom_llm_configuration(tmp_path):
             "llm_provider": "openai_compatible",
             "llm_base_url": "http://127.0.0.1:11434/v1",
             "llm_model": "llama3.3",
-            "llm_api_key": "",
+            "custom_api_key": "",
             "llm_temperature": 0.2,
             "llm_timeout_seconds": 60,
         }
     )
 
     assert payload["state"]["settings"]["llm_provider"] == "openai_compatible"
-    assert payload["state"]["settings"]["llm_api_key"] == ""
+    assert payload["state"]["settings"]["custom_api_key"] == ""
     assert isinstance(app.service.compiler.llm, OpenAICompatibleClient)
     assert app.service.compiler.llm.is_configured is True
 
@@ -362,7 +403,7 @@ def test_sidecar_normalizes_legacy_deepseek_endpoint_and_keeps_pro_model(tmp_pat
             "llm_provider": "openai_compatible",
             "llm_base_url": "https://api.deepseek.com/v1/",
             "llm_model": "deepseek-v4-pro",
-            "llm_api_key": "secret",
+            "deepseek_api_key": "secret",
             "llm_thinking_enabled": False,
         }
     )
@@ -374,30 +415,74 @@ def test_sidecar_normalizes_legacy_deepseek_endpoint_and_keeps_pro_model(tmp_pat
     assert settings["llm_thinking_enabled"] is False
 
 
-def test_state_masks_configured_api_key():
+def test_state_masks_configured_api_keys():
     from aura.models import Settings
 
-    payload = settings_payload(Settings(llm_api_key="secret-value"))
+    payload = settings_payload(
+        Settings(deepseek_api_key="deepseek-secret", custom_api_key="custom-secret"),
+    )
 
-    assert payload["llm_api_key"] == API_KEY_MASK
+    assert payload["deepseek_api_key"] == API_KEY_MASK
+    assert payload["custom_api_key"] == API_KEY_MASK
+    assert payload["deepseek_api_key_source"] == "config"
 
 
-def test_saving_llm_settings_discards_non_environment_secret(tmp_path):
+def test_saving_llm_settings_keeps_masked_config_key(tmp_path):
     app = local_app(tmp_path)
-    app.service.settings.llm_api_key = "existing-secret"
+    app.service.settings.deepseek_api_key = "existing-secret"
+    app.settings_store.save(app.service.settings)
 
     payload = app.save_llm_settings(
         {
             "llm_provider": "deepseek",
             "llm_base_url": "https://api.deepseek.com",
             "llm_model": "deepseek-v4-pro",
-            "llm_api_key": API_KEY_MASK,
+            "deepseek_api_key": API_KEY_MASK,
             "llm_thinking_enabled": False,
         }
     )
 
-    assert app.service.settings.llm_api_key == ""
-    assert payload["state"]["settings"]["llm_api_key"] == ""
+    assert app.service.settings.deepseek_api_key == "existing-secret"
+    saved = json.loads(app.settings_store.path.read_text(encoding="utf-8"))
+    assert saved["deepseek_api_key"] == "existing-secret"
+    assert payload["state"]["settings"]["deepseek_api_key"] == API_KEY_MASK
+
+
+def test_saving_llm_settings_persists_to_local_config(tmp_path):
+    app = local_app(tmp_path)
+
+    payload = app.save_llm_settings(
+        {
+            "llm_provider": "deepseek",
+            "llm_base_url": "https://api.deepseek.com",
+            "llm_model": "deepseek-v4-flash",
+            "deepseek_api_key": "new-secret",
+        }
+    )
+
+    saved = json.loads(app.settings_store.path.read_text(encoding="utf-8"))
+    assert saved["deepseek_api_key"] == "new-secret"
+    assert saved["custom_api_key"] == ""
+    assert payload["state"]["settings"]["deepseek_api_key_source"] == "config"
+
+
+def test_environment_variable_does_not_override_saved_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("AURA_DEEPSEEK_API_KEY", "environment-secret")
+    app = local_app(tmp_path)
+
+    payload = app.save_llm_settings(
+        {
+            "llm_provider": "deepseek",
+            "llm_base_url": "https://api.deepseek.com",
+            "llm_model": "deepseek-v4-flash",
+            "deepseek_api_key": "attempted-replacement",
+        }
+    )
+
+    assert app.service.settings.deepseek_api_key == "attempted-replacement"
+    saved = json.loads(app.settings_store.path.read_text(encoding="utf-8"))
+    assert saved["deepseek_api_key"] == "attempted-replacement"
+    assert payload["state"]["settings"]["deepseek_api_key_source"] == "config"
 
 
 def test_sidecar_switches_to_whisper_large_v3(tmp_path, monkeypatch):
@@ -445,9 +530,10 @@ def test_switching_stt_while_previous_model_loads_starts_new_warmup(tmp_path, mo
     release.set()
 
 
-def test_general_theme_setting_is_saved(tmp_path):
+def test_general_theme_and_language_settings_are_saved(tmp_path):
     app = local_app(tmp_path)
 
-    payload = app.save_general_settings({"ui_theme": "night"})
+    payload = app.save_general_settings({"ui_theme": "night", "ui_language": "ja"})
 
     assert payload["state"]["settings"]["ui_theme"] == "night"
+    assert payload["state"]["settings"]["ui_language"] == "ja"

@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:*; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* https://api.github.com; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
@@ -31,7 +31,7 @@
     "targets": "nsis",
     "externalBin": ["binaries/aura-sidecar"],
     "resources": {
-      "../modes/*.yaml": "modes/"
+      "../modes/official/*.yaml": "modes/official/"
     },
     "icon": [
       "icons/32x32.png",

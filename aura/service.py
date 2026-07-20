@@ -49,16 +49,17 @@ class AuraService:
             self.settings.llm_base_url
         )
         is_custom = not is_deepseek
-        if self.settings.llm_api_key or (
+        api_key = self.settings.deepseek_api_key if is_deepseek else self.settings.custom_api_key
+        if api_key or (
             is_custom and self.settings.llm_base_url and self.settings.llm_model
         ):
             return OpenAICompatibleClient(
                 base_url=self.settings.llm_base_url,
-                api_key=self.settings.llm_api_key,
+                api_key=api_key,
                 model=self.settings.llm_model,
                 temperature=self.settings.llm_temperature,
                 timeout_seconds=self.settings.llm_timeout_seconds,
-                allow_anonymous=is_custom and not self.settings.llm_api_key,
+                allow_anonymous=is_custom and not api_key,
                 thinking_enabled=(
                     self.settings.llm_thinking_enabled
                     if is_deepseek
@@ -153,6 +154,7 @@ class AuraService:
             previous_transcripts=self.sessions.previous_transcripts(),
             skills=self.settings.skills,
             merge_output=self.current_session.merge_output,
+            output_language=self.settings.ui_language,
         )
         parts: list[str] = []
         for chunk in self.compiler.stream_compile(request):
@@ -185,6 +187,7 @@ class AuraService:
             previous_transcripts=previous_transcripts,
             skills=self.settings.skills,
             merge_output=self.current_session.merge_output,
+            output_language=self.settings.ui_language,
         )
         parts: list[str] = []
         for chunk in self.compiler.stream_compile(request):

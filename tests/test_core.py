@@ -18,8 +18,10 @@ def test_modes_load():
     modes = ModeRegistry(Path("modes")).load()
     ids = {mode.id for mode in modes.all()}
     names = {mode.name for mode in modes.all()}
-    assert ids == {"coding_agent"}
-    assert names == {"标准模式"}
+    targets = {mode.target for mode in modes.all()}
+    assert ids == {"coding_agent", "decision_partner", "creative_studio"}
+    assert names == {"行动模式", "决策模式", "创作模式"}
+    assert len(targets) == 3
     assert modes.get("concise").id == "coding_agent"
     assert modes.get("professional").id == "coding_agent"
     assert modes.get("missing-mode").id in ids
@@ -31,16 +33,123 @@ def test_whisper_cuda_library_errors_are_detected_for_cpu_fallback():
     assert not _is_cuda_library_error(RuntimeError("audio file is invalid"))
 
 
-def test_builtin_standard_mode_has_universal_quality_contract():
+def test_builtin_action_mode_has_delivery_contract():
     modes = ModeRegistry(Path("modes")).load()
-    standard = modes.get("coding_agent").system_prompt
+    action = modes.get("coding_agent")
 
-    assert "一句话能说清的任务就用一句话" in standard
-    assert "不要为了显得专业而强行添加" in standard
-    assert "可以观察或验证的完成标准" in standard
-    assert "先理解现有实现与约定" in standard
-    assert "不要回答、解释或执行" in standard
-    assert "锟" not in standard
+    assert "目标已经明确，需要把事情做完" in action.system_prompt
+    assert "最小且足够的做法" in action.system_prompt
+    assert "真正完成修改、生成、排查或处理" in action.system_prompt
+    assert "可以观察或验证的完成标准" in action.system_prompt
+    assert "不用于开放创作或路线选择" in action.description
+    assert "锟" not in action.system_prompt
+
+
+def test_builtin_decision_mode_has_first_principles_contract():
+    decision = ModeRegistry(Path("modes")).load().get("decision_partner")
+
+    assert "第一性原理" in decision.system_prompt
+    assert "事实、假设和未知" in decision.system_prompt
+    assert "维持现状 / 延后决定" in decision.system_prompt
+    assert "最可能推翻当前判断的证据" in decision.system_prompt
+    assert "不用于目标明确的执行任务或内容创作" in decision.description
+
+
+def test_builtin_creative_mode_has_distinctive_expression_contract():
+    creative = ModeRegistry(Path("modes")).load().get("creative_studio")
+
+    assert "目标受众" in creative.system_prompt
+    assert "分开约束与自由" in creative.system_prompt
+    assert "避免陈词滥调" in creative.system_prompt
+    assert "先发散再收敛" in creative.system_prompt
+    assert "不用于工程执行或高风险决策" in creative.description
+
+
+def test_local_modes_upgrade_adds_new_builtins_and_preserves_custom_mode(tmp_path):
+    local_modes_dir = tmp_path / "local-modes"
+    local_modes_dir.mkdir()
+    (local_modes_dir / "001-coding_agent.yaml").write_text(
+        "\n".join(
+            [
+                "id: coding_agent",
+                "name: 标准模式",
+                "target: universal_agent",
+                "description: 面向所有人的全能模式：忠实澄清意图，自动适配任务复杂度，输出可执行、可验证的高质量提示词。",
+                "system_prompt: legacy standard prompt",
+                "output_hint: clear_actionable_prompt",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (local_modes_dir / "002-custom.yaml").write_text(
+        "\n".join(
+            [
+                "id: reviewer",
+                "name: 审查模式",
+                "target: reviewer",
+                "description: custom",
+                "system_prompt: review carefully",
+                "output_hint: review",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    registry = ModeRegistry(Path("modes"), local_modes_dir).load()
+
+    assert [mode.id for mode in registry.all()] == [
+        "coding_agent",
+        "decision_partner",
+        "creative_studio",
+        "reviewer",
+    ]
+    assert registry.get("coding_agent").name == "行动模式"
+    assert registry.get("reviewer").system_prompt == "review carefully"
+    assert registry.get("reviewer").source == "custom"
+    assert (local_modes_dir / "custom" / "001-reviewer.yaml").exists()
+    assert (local_modes_dir / "state.json").exists()
+    assert not list(local_modes_dir.glob("*.yaml"))
+    assert len(ModeRegistry(Path("modes"), local_modes_dir).load().all()) == 4
+
+
+def test_editing_official_mode_creates_private_asset_and_disables_original(tmp_path):
+    registry = ModeRegistry(Path("modes"), tmp_path / "local-modes").load()
+    modes = registry.all()
+    action = next(mode for mode in modes if mode.id == "coding_agent")
+    action.system_prompt = f"{action.system_prompt}\nPrivate addition."
+
+    registry.save_all(modes)
+
+    saved = registry.all()
+    official = next(mode for mode in saved if mode.id == "coding_agent")
+    private = next(mode for mode in saved if mode.base_mode_id == "coding_agent")
+    assert official.source == "official"
+    assert official.enabled is False
+    assert private.source == "custom"
+    assert private.enabled is True
+    assert private.icon == "sparkles"
+    assert "Private addition." in private.system_prompt
+    assert list((tmp_path / "local-modes" / "custom").glob("*.yaml"))
+
+
+def test_disabled_modes_are_hidden_from_resolution_but_remain_editable(tmp_path):
+    registry = ModeRegistry(Path("modes"), tmp_path / "local-modes").load()
+    modes = registry.all()
+    for mode in modes:
+        mode.enabled = mode.id != "decision_partner"
+
+    registry.save_all(modes)
+
+    assert registry.get("decision_partner").id == "coding_agent"
+    assert {mode.id for mode in registry.all()} == {
+        "coding_agent",
+        "decision_partner",
+        "creative_studio",
+    }
+    assert {mode.id for mode in registry.all(enabled_only=True)} == {
+        "coding_agent",
+        "creative_studio",
+    }
 
 
 def test_rule_based_compiler_adds_safety_boundary_for_risky_text():
@@ -64,6 +173,56 @@ def test_compile_request_includes_previous_context():
     messages = request.as_messages()
     assert '"previous_compiled_prompt": "请优化登录页。"' in messages[-1]["content"]
     assert "合并输出已开启" in messages[-1]["content"]
+
+
+def test_compile_request_enforces_selected_output_language():
+    mode = ModeRegistry(Path("modes")).load().get("coding_agent")
+    messages = CompileRequest(
+        mode=mode,
+        current_transcript="帮我整理这个需求",
+        output_language="ja",
+    ).as_messages()
+
+    assert "最终提示词必须使用日本語" in messages[0]["content"]
+    assert '"output_language": "ja"' in messages[-1]["content"]
+
+
+def test_rule_based_compiler_uses_selected_output_language_template():
+    mode = ModeRegistry(Path("modes")).load().get("coding_agent")
+    result = PromptCompiler(RuleBasedCompiler()).compile(
+        CompileRequest(
+            mode=mode,
+            current_transcript="update the settings page",
+            output_language="en",
+        )
+    )
+
+    assert result.startswith("Complete the following task:")
+    assert "Acceptance criteria:" in result
+
+
+def test_rule_based_compiler_uses_decision_mode_structure():
+    mode = ModeRegistry(Path("modes")).load().get("decision_partner")
+    result = PromptCompiler(RuleBasedCompiler()).compile(
+        CompileRequest(mode=mode, current_transcript="我们要自研还是采购客服系统")
+    )
+
+    assert result.startswith("请完成以下决策分析：")
+    assert "第一性原理" in result
+    assert "维持现状" in result
+    assert "执行要求：" not in result
+
+
+def test_rule_based_compiler_uses_creative_mode_structure():
+    mode = ModeRegistry(Path("modes")).load().get("creative_studio")
+    result = PromptCompiler(RuleBasedCompiler()).compile(
+        CompileRequest(mode=mode, current_transcript="给独立咖啡品牌写一条开业短片脚本")
+    )
+
+    assert result.startswith("请完成以下创作任务：")
+    assert "目标受众" in result
+    assert "陈词滥调" in result
+    assert "验收标准：" not in result
 
 
 def test_compile_request_includes_enabled_skills():

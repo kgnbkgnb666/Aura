@@ -32,7 +32,7 @@ cargo check --locked --manifest-path src-tauri\Cargo.toml
 
 - STT Provider 放在 `aura/providers/stt/`，实现 `SpeechToTextProvider` 协议。
 - LLM Provider 放在 `aura/providers/llm/`，实现 `LLMProvider` 协议。
-- 提示词模式放在 `modes/`，使用带稳定 `id` 的 YAML 文件。
+- 官方提示词模式放在 `modes/official/`，使用带稳定 `id` 和 `icon` 的 YAML 文件。`.aura-local/modes/` 是用户私人资产，不应提交。
 - 新行为需要测试；修复 Bug 时应先添加能复现问题的回归用例。
 - 面向用户的错误信息尽量清楚、可操作，不记录密钥和完整敏感文本。
 

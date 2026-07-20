@@ -18,16 +18,17 @@ def build_compiler():
         settings.llm_base_url
     )
     is_custom = not is_deepseek
-    if settings.llm_api_key or (
+    api_key = settings.deepseek_api_key if is_deepseek else settings.custom_api_key
+    if api_key or (
         is_custom and settings.llm_base_url and settings.llm_model
     ):
         llm = OpenAICompatibleClient(
             base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
+            api_key=api_key,
             model=settings.llm_model,
             temperature=settings.llm_temperature,
             timeout_seconds=settings.llm_timeout_seconds,
-            allow_anonymous=is_custom and not settings.llm_api_key,
+            allow_anonymous=is_custom and not api_key,
             thinking_enabled=(
                 settings.llm_thinking_enabled
                 if is_deepseek

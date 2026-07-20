@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "autostart:default"
+    "autostart:default",
+    "dialog:allow-open",
+    "opener:default"
   ]
 }

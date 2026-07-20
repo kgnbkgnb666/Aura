@@ -64,7 +64,7 @@ def test_service_builds_anonymous_custom_provider():
         llm_provider="openai_compatible",
         llm_base_url="http://127.0.0.1:8000/v1",
         llm_model="custom-model",
-        llm_api_key="",
+        custom_api_key="",
     )
 
     client = service._build_llm()
@@ -75,7 +75,7 @@ def test_service_builds_anonymous_custom_provider():
 
 def test_service_uses_deepseek_v4_flash_without_thinking_by_default():
     service = object.__new__(AuraService)
-    service.settings = Settings(llm_api_key="secret")
+    service.settings = Settings(deepseek_api_key="secret")
 
     client = service._build_llm()
 

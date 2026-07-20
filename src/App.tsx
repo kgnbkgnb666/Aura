@@ -1,21 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   Check,
+  ChevronDown,
   Clipboard,
   Cpu,
   FileCheck2,
+  FolderOpen,
+  Github,
   GripVertical,
   GitMerge,
   History,
   Keyboard,
+  ListChecks,
   Mic,
   Moon,
+  Palette,
   Pencil,
   Play,
   Plus,
   RefreshCcw,
+  Scale,
   Settings as SettingsIcon,
   SlidersHorizontal,
   Sparkles,
@@ -23,8 +36,10 @@ import {
   Terminal,
   Trash2
 } from "lucide-react";
-import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, autostart, ensureSidecar, hideMainWindow } from "./api";
+import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, autostart, ensureSidecar, hideMainWindow, setTrayLanguage } from "./api";
 import deepseekLogo from "./assets/deepseek-logo.svg";
+import { setUiLanguage, storedLanguage, UI_LANGUAGES, UiLanguage } from "./i18n";
+import { AURA_GITHUB_URL, checkGitHubUpdate, UpdateCheckResult } from "./update";
 
 type Tab = "main" | "general" | "speech" | "llm" | "modes" | "skills" | "shortcuts" | "logs" | "history";
 type ThemeId = "morning" | "night";
@@ -54,9 +69,13 @@ const emptySettings: Settings = {
   stt_provider: "sensevoice-small",
   model_cache_dir: "",
   ui_theme: storedTheme(),
+  ui_language: storedLanguage(),
   llm_provider: "deepseek",
   llm_base_url: "https://api.deepseek.com",
-  llm_api_key: "",
+  deepseek_api_key: "",
+  custom_api_key: "",
+  deepseek_api_key_source: "unset",
+  custom_api_key_source: "unset",
   llm_model: "deepseek-v4-flash",
   llm_thinking_enabled: false,
   llm_temperature: 0.2,
@@ -71,9 +90,9 @@ function compactText(value: string, limit = 34) {
   return text.length > limit ? `${text.slice(0, limit)}...` : text;
 }
 
-function shortTime(value: string) {
+function shortTime(value: string, locale?: string) {
   if (!value) return "";
-  return new Date(value).toLocaleString([], {
+  return new Date(value).toLocaleString(locale, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -85,7 +104,146 @@ function stateSkills(state: AppState) {
   return state.skills || state.settings.skills || [];
 }
 
+function localizeRuntimeStatus(value: string | undefined, t: TFunction): string {
+  if (!value) return "";
+  const exact: Record<string, string> = {
+    "准备就绪": "runtime.ready",
+    "正在录音": "runtime.recording",
+    "正在转录": "runtime.transcribing",
+    "正在整理": "runtime.organizing",
+    "已复制": "runtime.copied",
+    "整理完成": "runtime.organized",
+    "新会话": "runtime.newSession",
+    "合并需求输出已开启": "runtime.mergeOn",
+    "仅输出本次需求": "runtime.mergeOff",
+    "设置已保存": "runtime.settingsSaved",
+    "语音设置已保存": "runtime.speechSaved",
+    "LLM 设置已保存": "runtime.llmSaved",
+    "Skill 配置已保存": "runtime.skillsSaved",
+    "正在预加载转录模型": "runtime.preloading",
+    "正在测试麦克风": "runtime.micTesting",
+    "麦克风测试完成": "runtime.micDone",
+    "正在转录测试音频": "runtime.testTranscribing",
+    "测试转录完成": "runtime.testDone",
+    "重新编译完成": "runtime.recompiled",
+    "历史已清空": "runtime.historyCleared",
+    "历史记录已删除": "runtime.historyDeleted",
+    "SenseVoice-Small 模型已就绪": "runtime.sensevoiceReady",
+    "正在使用 SenseVoice-Small 识别语音": "runtime.sensevoiceUsing",
+    "正在使用 Whisper Large V3 识别语音": "runtime.whisperUsing",
+    "CUDA 运行库不完整，已自动切换到 CPU 模式": "runtime.cudaFallback"
+  };
+  if (exact[value]) return t(exact[value]);
+  const recording = value.match(/^录音中\s+(.+)$/);
+  if (recording) return t("runtime.recordingLevel", { volume: recording[1] });
+  const extracted = value.match(/^已提取\s+(\d+)\s+个 Skill$/);
+  if (extracted) return t("runtime.extracted", { count: Number(extracted[1]) });
+  const mode = value.match(/^模式:\s*(.+)$/);
+  if (mode) return t("runtime.mode", { name: mode[1] });
+  const defaultMode = value.match(/^默认模式:\s*(.+)$/);
+  if (defaultMode) return t("runtime.defaultMode", { name: defaultMode[1] });
+  const history = value.match(/^已切换历史:\s*(.+)$/);
+  if (history) return t("runtime.historyLoaded", { name: history[1] });
+  return value;
+}
+
 const deepseekModels = ["deepseek-v4-flash", "deepseek-v4-pro"];
+
+const builtinModeKeys: Record<string, "action" | "decision" | "creative"> = {
+  coding_agent: "action",
+  decision_partner: "decision",
+  creative_studio: "creative"
+};
+
+function modeDisplayName(mode: Mode, t: TFunction) {
+  const key = mode.source === "official" ? builtinModeKeys[mode.id] : undefined;
+  return key ? t(`modePresets.${key}.name`) : mode.name;
+}
+
+function modeDisplayDescription(mode: Mode, t: TFunction) {
+  const key = mode.source === "official" ? builtinModeKeys[mode.id] : undefined;
+  return key ? t(`modePresets.${key}.description`) : mode.description;
+}
+
+function ModeGlyph({ mode, size = 14 }: { mode: Mode; size?: number }) {
+  if (mode.source !== "official") return <Sparkles size={size} />;
+  if (mode.icon === "list-checks") return <ListChecks size={size} />;
+  if (mode.icon === "scale") return <Scale size={size} />;
+  if (mode.icon === "palette") return <Palette size={size} />;
+  return <Sparkles size={size} />;
+}
+
+function ModeSelect({
+  modes,
+  selectedMode,
+  onSelect
+}: {
+  modes: Mode[];
+  selectedMode: Mode | undefined;
+  onSelect: (modeId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="mode-select" ref={rootRef}>
+      <button
+        className="mode-select-trigger"
+        aria-label={t("main.currentMode")}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {selectedMode ? <ModeGlyph mode={selectedMode} size={15} /> : <Sparkles size={15} />}
+        <span>{selectedMode ? modeDisplayName(selectedMode, t) : t("main.currentMode")}</span>
+        <ChevronDown className={open ? "open" : ""} size={14} />
+      </button>
+      {open ? (
+        <div className="mode-select-menu" role="listbox" aria-label={t("main.currentMode")}>
+          {modes.map((mode) => {
+            const selected = selectedMode?.id === mode.id;
+            return (
+              <button
+                key={mode.id}
+                className={selected ? "active" : ""}
+                role="option"
+                aria-selected={selected}
+                onClick={() => {
+                  setOpen(false);
+                  onSelect(mode.id);
+                }}
+              >
+                <span className={`mode-select-icon ${mode.source}`}><ModeGlyph mode={mode} size={15} /></span>
+                <span className="mode-select-copy">
+                  <strong>{modeDisplayName(mode, t)}</strong>
+                  <small>{modeDisplayDescription(mode, t)}</small>
+                </span>
+                {selected ? <Check size={14} /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function isDeepSeekEndpoint(value: string) {
   const normalized = value.trim().toLowerCase().replace(/\/+$/, "");
@@ -93,6 +251,7 @@ function isDeepSeekEndpoint(value: string) {
 }
 
 export default function App() {
+  const { t, i18n } = useTranslation();
   const [state, setState] = useState<AppState | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("main");
@@ -110,8 +269,10 @@ export default function App() {
   const [skillDrafts, setSkillDrafts] = useState<Skill[]>([]);
   const [skillScanDir, setSkillScanDir] = useState("");
   const [speechTestResult, setSpeechTestResult] = useState("");
+  const [warmupActive, setWarmupActive] = useState(false);
+  const [warmupProgress, setWarmupProgress] = useState(0);
   const [bootProgress, setBootProgress] = useState(0);
-  const [bootStatus, setBootStatus] = useState("正在连接 Aura sidecar");
+  const [bootStatus, setBootStatus] = useState(() => i18n.t("boot.connecting"));
   const [bootStage, setBootStage] = useState("connecting");
   const [bootElapsedSeconds, setBootElapsedSeconds] = useState(0);
   const [transcriptEditing, setTranscriptEditing] = useState(false);
@@ -119,13 +280,21 @@ export default function App() {
   const recordingRef = useRef(false);
   const transcriptEditedByUser = useRef(false);
   const historySelectRef = useRef<HTMLSelectElement>(null);
+  const speechSaveVersion = useRef(0);
 
-  const status = error || state?.runtime.status || "启动中";
+  const status = error || localizeRuntimeStatus(state?.runtime.status, t) || t("boot.loading");
   const selectedMode = state?.current_mode;
+  const enabledModes = state?.modes.filter((mode) => mode.enabled) || [];
 
   useEffect(() => {
     applyTheme(draft.ui_theme || "morning");
   }, [draft.ui_theme]);
+
+  useEffect(() => {
+    if (!draft.ui_language) return;
+    if (i18n.language !== draft.ui_language) void setUiLanguage(draft.ui_language);
+    void setTrayLanguage(draft.ui_language).catch(() => undefined);
+  }, [draft.ui_language, i18n.language]);
 
   useEffect(() => {
     if (state || error) return;
@@ -163,15 +332,15 @@ export default function App() {
       try {
         await ensureSidecar();
         if (cancelled) return;
-        setBootStatus("正在准备语音识别模型");
+        setBootStatus(i18n.t("boot.startingSpeech"));
         setBootStage("checking");
         let initial = await api.state();
         setBootProgress(initial.service.transcriber_progress);
         setBootStage(initial.service.transcriber_status);
         setBootStatus(
           initial.service.transcriber_ready
-            ? "语音识别模型已就绪"
-            : "正在检查本地语音模型"
+            ? i18n.t("boot.speechReady")
+            : i18n.t("boot.checkingSpeech")
         );
         if (!initial.service.transcriber_ready) {
           await api.warmupStt();
@@ -179,10 +348,10 @@ export default function App() {
             initial = await api.state();
             setBootProgress(initial.service.transcriber_progress);
             setBootStage(initial.service.transcriber_status);
-            setBootStatus(initial.runtime.status || "正在加载语音识别模型");
+            setBootStatus(localizeRuntimeStatus(initial.runtime.status, i18n.t.bind(i18n)) || i18n.t("boot.loadingSpeech"));
             if (initial.service.transcriber_ready) break;
             if (initial.service.transcriber_status === "error") {
-              throw new Error(initial.service.transcriber_error || initial.runtime.status || "语音识别模型加载失败");
+              throw new Error(initial.service.transcriber_error || initial.runtime.status || i18n.t("boot.speechFailed"));
             }
             await new Promise((resolve) => window.setTimeout(resolve, 200));
           }
@@ -190,7 +359,7 @@ export default function App() {
         if (cancelled) return;
         setBootProgress(100);
         setBootStage("ready");
-        setBootStatus("语音识别模型已就绪");
+        setBootStatus(i18n.t("boot.speechReady"));
         const latestHistory = initial.history[0];
         const restored = latestHistory ? await api.loadSession(latestHistory.id) : null;
         const next = restored?.state || (await api.newSession(initial.current_mode?.id || initial.settings.mode_id)).state;
@@ -240,6 +409,13 @@ export default function App() {
   }, [activeTab, loadLogs]);
 
   useEffect(() => {
+    if (activeTab !== "speech") return;
+    void loadDevices().catch((exc) => {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    });
+  }, [activeTab, loadDevices]);
+
+  useEffect(() => {
     if (!state?.runtime.recording) return;
     const id = window.setInterval(async () => {
       try {
@@ -281,15 +457,15 @@ export default function App() {
     historySelectRef.current?.blur();
     if (recordingRef.current) return;
     if (!state) {
-      setBootStatus("语音模型仍在加载，完成后即可按住空格录音");
+      setBootStatus(t("main.speechLoading"));
       return;
     }
     if (!state.service.transcriber_ready) {
-      setError("语音识别模型尚未就绪，请稍候再录音。");
+      setError(t("main.speechNotReady"));
       return;
     }
     if (busy) {
-      setError("上一段录音仍在处理中，请完成后再录音。");
+      setError(t("main.busy"));
       return;
     }
     try {
@@ -321,7 +497,7 @@ export default function App() {
         setCompiled(legacyPayload.compiled || "");
         if (legacyPayload.state) setState(legacyPayload.state);
         setBusy(false);
-        setError("Aura sidecar 协议过旧，请重启应用。");
+        setError(t("main.oldSidecar"));
         return;
       }
       setTranscript(payload.job.transcript);
@@ -381,8 +557,8 @@ export default function App() {
     const id = window.setTimeout(() => {
       setCopied(false);
       setState((current) => {
-        if (!current || current.runtime.status !== "已复制") return current;
-        return { ...current, runtime: { ...current.runtime, status: "整理完成" } };
+        if (!current || current.runtime.status !== t("common.copied")) return current;
+        return { ...current, runtime: { ...current.runtime, status: t("main.organized") } };
       });
     }, 1500);
     return () => window.clearTimeout(id);
@@ -486,10 +662,10 @@ export default function App() {
   }
 
   async function shiftMode(delta: number) {
-    if (!state?.modes.length || !state.current_mode) return;
-    const index = state.modes.findIndex((mode) => mode.id === state.current_mode.id);
-    const nextIndex = (Math.max(index, 0) + delta + state.modes.length) % state.modes.length;
-    await setMode(state.modes[nextIndex].id);
+    if (!enabledModes.length || !state?.current_mode) return;
+    const index = enabledModes.findIndex((mode) => mode.id === state.current_mode.id);
+    const nextIndex = (Math.max(index, 0) + delta + enabledModes.length) % enabledModes.length;
+    await setMode(enabledModes[nextIndex].id);
   }
 
   async function newSession() {
@@ -542,10 +718,20 @@ export default function App() {
     }
   }
 
-  async function saveSpeech() {
-    const payload = await api.saveSpeech(draft);
-    setState(payload.state);
-    setDraft(payload.state.settings);
+  async function saveSpeech(next: Settings) {
+    const version = speechSaveVersion.current + 1;
+    speechSaveVersion.current = version;
+    setDraft(next);
+    setError("");
+    try {
+      const payload = await api.saveSpeech(next);
+      if (version !== speechSaveVersion.current) return;
+      setState(payload.state);
+      setDraft(payload.state.settings);
+    } catch (exc) {
+      if (version !== speechSaveVersion.current) return;
+      setError(exc instanceof Error ? exc.message : String(exc));
+    }
   }
 
   async function saveLlm() {
@@ -572,12 +758,13 @@ export default function App() {
     setModeDrafts(payload.state.modes);
   }
 
-  async function scanSkills() {
+  async function scanSkills(directory = skillScanDir) {
     try {
       setError("");
-      const payload = await api.scanSkills(skillScanDir);
+      const payload = await api.scanSkills(directory);
       setState(payload.state);
       setDraft(payload.state.settings);
+      setSkillScanDir(payload.state.settings.skill_scan_dir || directory);
       setSkillDrafts(stateSkills(payload.state));
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
@@ -597,8 +784,35 @@ export default function App() {
   }
 
   async function warmup() {
-    const payload = await api.warmupStt();
-    setState(payload.state);
+    setWarmupActive(true);
+    setWarmupProgress(0);
+    setError("");
+    try {
+      const payload = await api.warmupStt();
+      setState(payload.state);
+      if (payload.state.service.transcriber_ready) {
+        setWarmupProgress(100);
+        setWarmupActive(false);
+        return;
+      }
+      while (true) {
+        const current = await api.state();
+        setState(current);
+        setWarmupProgress(current.service.transcriber_progress);
+        if (current.service.transcriber_ready) {
+          setWarmupProgress(100);
+          break;
+        }
+        if (current.service.transcriber_status === "error") {
+          throw new Error(current.service.transcriber_error || t("speech.preloadError"));
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+      }
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setWarmupActive(false);
+    }
   }
 
   async function testMicrophone() {
@@ -610,9 +824,11 @@ export default function App() {
     try {
       const payload = await api.testMicrophone();
       setState(payload.state);
-      setTranscript(
-        `时长: ${payload.recording.duration_seconds.toFixed(2)}s\n平均音量: ${payload.recording.average_volume.toFixed(0)}\n最大音量: ${payload.recording.max_volume}`
-      );
+      setTranscript(t("speech.duration", {
+        duration: payload.recording.duration_seconds.toFixed(2),
+        average: payload.recording.average_volume.toFixed(0),
+        maximum: payload.recording.max_volume
+      }));
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
@@ -628,7 +844,7 @@ export default function App() {
     try {
       const payload = await api.transcribeTest();
       setState(payload.state);
-      setSpeechTestResult(payload.transcript || "未识别到内容");
+      setSpeechTestResult(payload.transcript || t("speech.noResult"));
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
@@ -642,7 +858,7 @@ export default function App() {
   }
 
   async function deleteHistory(sessionId: string) {
-    if (!window.confirm("删除这条历史记录？此操作无法撤销。")) return;
+    if (!window.confirm(t("history.confirmDelete"))) return;
     const payload = await api.deleteHistory(sessionId);
     setState(payload.state);
     if (payload.deleted_current) {
@@ -689,12 +905,12 @@ export default function App() {
       <main className="boot">
         <div className="boot-mark"><Sparkles size={28} /></div>
         <div className="boot-copy">
-          <strong>{error ? "启动失败" : "正在启动 Aura"}</strong>
+          <strong>{error ? t("boot.failed") : t("boot.starting")}</strong>
           <span>{error || bootStatus}</span>
           <div
             className={`boot-progress ${!error && bootProgress < 100 ? "active" : ""}`}
             role="progressbar"
-            aria-label="STT 模型加载进度"
+            aria-label={t("boot.progress")}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={bootProgress}
@@ -703,10 +919,10 @@ export default function App() {
           </div>
           <small>
             {error
-              ? "启动未完成，请根据上方信息检查配置"
+              ? t("boot.incomplete")
               : bootStage === "downloading"
-                ? `模型正在下载 · 已等待 ${bootElapsedSeconds} 秒 · 下载速度取决于网络`
-                : `${Math.round(bootProgress)}% · 已等待 ${bootElapsedSeconds} 秒 · 后台仍在工作`}
+                ? t("boot.downloading", { seconds: bootElapsedSeconds })
+                : t("boot.working", { progress: Math.round(bootProgress), seconds: bootElapsedSeconds })}
           </small>
         </div>
       </main>
@@ -718,20 +934,20 @@ export default function App() {
       <main className="app-shell settings-shell">
         <section className="settings-view">
           <header className="settings-header">
-            <button title="返回" onClick={closeSettings}>
+            <button title={t("common.back")} onClick={closeSettings}>
               <ArrowLeft size={16} />
-              <span>返回</span>
+              <span>{t("common.back")}</span>
             </button>
           </header>
           <div className="settings-content">
             <nav className="settings-tabs">
               <button className={activeTab === "general" ? "active" : ""} onClick={() => setActiveTab("general")}>
                 <SettingsIcon size={15} />
-                <span>通用</span>
+                <span>{t("tabs.general")}</span>
               </button>
               <button className={activeTab === "speech" ? "active" : ""} onClick={() => setActiveTab("speech")}>
                 <Mic size={15} />
-                <span>语音</span>
+                <span>{t("tabs.speech")}</span>
               </button>
               <button className={activeTab === "llm" ? "active" : ""} onClick={() => setActiveTab("llm")}>
                 <SlidersHorizontal size={15} />
@@ -739,23 +955,23 @@ export default function App() {
               </button>
               <button className={activeTab === "modes" ? "active" : ""} onClick={() => setActiveTab("modes")}>
                 <GripVertical size={15} />
-                <span>模式</span>
+                <span>{t("tabs.modes")}</span>
               </button>
               <button className={activeTab === "skills" ? "active" : ""} onClick={() => setActiveTab("skills")}>
                 <Cpu size={15} />
-                <span>Skill 配置</span>
+                <span>{t("tabs.skills")}</span>
               </button>
               <button className={activeTab === "shortcuts" ? "active" : ""} onClick={() => setActiveTab("shortcuts")}>
                 <Keyboard size={15} />
-                <span>快捷键</span>
+                <span>{t("tabs.shortcuts")}</span>
               </button>
               <button className={activeTab === "logs" ? "active" : ""} onClick={() => setActiveTab("logs")}>
                 <Terminal size={15} />
-                <span>日志</span>
+                <span>{t("tabs.logs")}</span>
               </button>
               <button className={activeTab === "history" ? "active" : ""} onClick={() => setActiveTab("history")}>
                 <History size={15} />
-                <span>历史</span>
+                <span>{t("tabs.history")}</span>
               </button>
             </nav>
             <div className="settings-page">
@@ -771,8 +987,9 @@ export default function App() {
                 micTestCountdown={micTestCountdown}
                 micTestLevel={micTestLevel}
                 speechTestResult={speechTestResult}
+                warmupActive={warmupActive}
+                warmupProgress={warmupProgress}
                 onDraft={setDraft}
-                onRefreshDevices={loadDevices}
                 onSave={saveSpeech}
                 onWarmup={warmup}
                 onTestMic={testMicrophone}
@@ -812,17 +1029,11 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <select aria-label="当前模式" value={selectedMode?.id || ""} onChange={(event) => setMode(event.target.value)}>
-          {state.modes.map((mode) => (
-            <option key={mode.id} value={mode.id}>
-              {mode.name}
-            </option>
-          ))}
-        </select>
+        <ModeSelect modes={enabledModes} selectedMode={selectedMode} onSelect={(modeId) => void setMode(modeId)} />
         <select
           key={state.current_session.id}
           ref={historySelectRef}
-          aria-label="历史会话"
+          aria-label={t("main.historySessions")}
           value={state.current_session.id}
           disabled={state.runtime.recording || busy}
           onChange={(event) => {
@@ -837,10 +1048,10 @@ export default function App() {
             }
           }}
         >
-          <option value={state.current_session.id}>历史会话</option>
+          <option value={state.current_session.id}>{t("main.historySessions")}</option>
           {state.history.filter((item) => item.id !== state.current_session.id).map((item) => (
             <option key={item.id} value={item.id}>
-              {shortTime(item.updated_at)} · {compactText(item.last_transcript || item.last_compiled || item.title, 42)}
+              {shortTime(item.updated_at, i18n.language)} · {compactText(item.last_transcript || item.last_compiled || item.title, 42)}
             </option>
           ))}
         </select>
@@ -850,10 +1061,10 @@ export default function App() {
             <i style={{ width: `${volumePercent}%` }} />
           </div>
         </div>
-        <button title="新会话" disabled={busy || state.runtime.recording || Boolean(activeJobId)} onClick={newSession}>
+        <button title={t("main.newSession")} disabled={busy || state.runtime.recording || Boolean(activeJobId)} onClick={newSession}>
           <RefreshCcw size={16} />
         </button>
-        <button title="设置" onClick={() => openSettings("general")}>
+        <button title={t("main.settings")} onClick={() => openSettings("general")}>
           <SettingsIcon size={16} />
         </button>
       </header>
@@ -862,59 +1073,59 @@ export default function App() {
         <div className="editor-column">
           <div className="text-pane">
             <div className="pane-head">
-              <span className="pane-title"><Mic size={14} />原始转录</span>
+              <span className="pane-title"><Mic size={14} />{t("main.rawTranscript")}</span>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 {state.runtime.recording ? <Mic size={16} /> : null}
                 <button
-                  title={transcriptEditing ? "完成编辑" : "编辑原始转录"}
+                  title={transcriptEditing ? t("main.finishEdit") : t("main.editTranscript")}
                   disabled={busy || state.runtime.recording}
                   onClick={() => transcriptEditing ? void finishEditing("transcript") : setTranscriptEditing(true)}
                 >
                   {transcriptEditing ? <Check size={14} /> : <Pencil size={14} />}
-                  <span>{transcriptEditing ? "完成" : "编辑"}</span>
+                  <span>{transcriptEditing ? t("common.done") : t("common.edit")}</span>
                 </button>
               </div>
             </div>
             <textarea
               value={transcript}
               readOnly={!transcriptEditing}
-              aria-label="原始转录"
+              aria-label={t("main.rawTranscript")}
               onChange={(e) => { setTranscript(e.target.value); transcriptEditedByUser.current = true; }}
               placeholder=" "
             />
           </div>
           <div className={`text-pane result-pane ${copied ? "copied" : ""}`}>
             <div className="pane-head">
-	              <span className="pane-title"><FileCheck2 size={14} />AI 编译结果</span>
+	              <span className="pane-title"><FileCheck2 size={14} />{t("main.compiled")}</span>
 	              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
 	                <button
 	                  className={`merge-output-button ${state.current_session.merge_output ? "active" : ""}`}
-	                  title={state.current_session.merge_output ? "已开启：合并本会话的全部需求" : "已关闭：只输出本次新需求"}
+	                  title={state.current_session.merge_output ? t("main.mergeOn") : t("main.mergeOff")}
 	                  aria-pressed={state.current_session.merge_output}
 	                  disabled={busy || state.runtime.recording || Boolean(activeJobId)}
 	                  onClick={() => void toggleMergeOutput()}
 	                >
 	                  <GitMerge size={14} />
-	                  <span>合并需求输出</span>
+	                  <span>{t("main.mergeOutput")}</span>
 	                </button>
 	                <button
-                  title={compiledEditing ? "完成编辑" : "编辑 AI 编译结果"}
+                  title={compiledEditing ? t("main.finishEdit") : t("main.editCompiled")}
                   disabled={busy}
                   onClick={() => compiledEditing ? void finishEditing("compiled") : setCompiledEditing(true)}
                 >
                   {compiledEditing ? <Check size={14} /> : <Pencil size={14} />}
-                  <span>{compiledEditing ? "完成" : "编辑"}</span>
+                  <span>{compiledEditing ? t("common.done") : t("common.edit")}</span>
                 </button>
-                <button className={copied ? "copy-button copied" : "copy-button"} title={copied ? "已复制" : "复制"} onClick={copyCompiled}>
+                <button className={copied ? "copy-button copied" : "copy-button"} title={copied ? t("common.copied") : t("common.copy")} onClick={copyCompiled}>
                   {copied ? <Check size={15} /> : <Clipboard size={15} />}
-                  <span>{copied ? "已复制" : "复制"}</span>
+                  <span>{copied ? t("common.copied") : t("common.copy")}</span>
                 </button>
               </div>
             </div>
             <textarea
               value={compiled}
               readOnly={!compiledEditing}
-              aria-label="AI 编译结果"
+              aria-label={t("main.compiled")}
               onChange={(e) => setCompiled(e.target.value)}
               placeholder=" "
             />
@@ -934,82 +1145,90 @@ function SpeechSettings(props: {
   micTestCountdown: number;
   micTestLevel: number;
   speechTestResult: string;
+  warmupActive: boolean;
+  warmupProgress: number;
   onDraft: (settings: Settings) => void;
-  onRefreshDevices: () => void;
-  onSave: () => void;
+  onSave: (settings: Settings) => void;
   onWarmup: () => void;
   onTestMic: () => void;
   onTranscribeTest: () => void;
 }) {
+  const { t } = useTranslation();
   const { draft, devices, busy, onDraft } = props;
   return (
     <div className="settings-body">
       <label>
-        <span>语音识别模型</span>
+        <span>{t("speech.model")}</span>
         <select
           value={draft.stt_provider}
-          onChange={(event) => onDraft({ ...draft, stt_provider: event.target.value })}
+          onChange={(event) => {
+            const next = { ...draft, stt_provider: event.target.value };
+            onDraft(next);
+            props.onSave(next);
+          }}
         >
-          <option value="sensevoice-small">SenseVoice Small（轻量快速）</option>
-          <option value="whisper-large-v3">Whisper Large V3（高精度）</option>
+          <option value="sensevoice-small">{t("speech.sensevoice")}</option>
+          <option value="whisper-large-v3">{t("speech.whisper")}</option>
         </select>
       </label>
       <div className="model-note">
         <strong>{draft.stt_provider === "whisper-large-v3" ? "Whisper Large V3" : "SenseVoice Small"}</strong>
         <span>
           {draft.stt_provider === "whisper-large-v3"
-            ? "首次保存后自动下载约 3 GB 模型；支持 NVIDIA GPU，CPU 也可运行但速度较慢。"
-            : "首次使用时自动下载，体积较小，适合中文实时输入。"}
+            ? t("speech.whisperNote")
+            : t("speech.sensevoiceNote")}
         </span>
       </div>
       <label>
-        <span>麦克风</span>
+        <span>{t("speech.microphone")}</span>
         <select
           value={draft.input_device_index ?? ""}
-          onChange={(event) =>
-            onDraft({
+          onChange={(event) => {
+            const next = {
               ...draft,
               input_device_index: event.target.value === "" ? null : Number(event.target.value)
-            })
-          }
+            };
+            onDraft(next);
+            props.onSave(next);
+          }}
         >
-          <option value="">默认输入设备</option>
+          <option value="">{t("speech.defaultInput")}</option>
           {devices.map((device) => (
             <option key={device.index} value={device.index}>
               {device.index}: {device.name}
-              {device.is_default_input ? " 默认" : ""}
+              {device.is_default_input ? t("speech.defaultSuffix") : ""}
             </option>
           ))}
         </select>
       </label>
       <label>
-        <span>模型缓存目录</span>
-        <input value={draft.model_cache_dir || ""} onChange={(event) => onDraft({ ...draft, model_cache_dir: event.target.value })} />
+        <span>{t("speech.cacheDir")}</span>
+        <input
+          value={draft.model_cache_dir || ""}
+          onChange={(event) => onDraft({ ...draft, model_cache_dir: event.target.value })}
+          onBlur={() => props.onSave(draft)}
+        />
       </label>
-      <div className="button-row">
-        <button onClick={props.onRefreshDevices}>
-          <RefreshCcw size={15} />
-          <span>刷新</span>
-        </button>
-        <button onClick={props.onSave}>
-          <Check size={15} />
-          <span>保存</span>
-        </button>
-      </div>
       <div className="button-row">
         <button disabled={busy} onClick={props.onTestMic}>
           <Mic size={15} />
-          <span>测试麦克风</span>
+          <span>{t("speech.testMic")}</span>
         </button>
         <button disabled={busy} onClick={props.onTranscribeTest}>
           <Play size={15} />
-          <span>测试转录</span>
+          <span>{t("speech.testTranscription")}</span>
         </button>
       </div>
-      <button onClick={props.onWarmup}>
+      <button onClick={props.onWarmup} disabled={props.warmupActive}>
         <Cpu size={15} />
-        <span>预加载模型</span>
+        <span>{props.warmupActive ? t("speech.preloading") : t("speech.preload")}</span>
       </button>
+      {props.warmupActive ? (
+        <div className="boot-progress" role="progressbar" aria-label={t("speech.modelProgress")}
+          aria-valuemin={0} aria-valuemax={100} aria-valuenow={props.warmupProgress}>
+          <i style={{ width: `${Math.max(props.warmupProgress, 5)}%` }} />
+        </div>
+      ) : null}
       {props.micTestActive ? (
         <div className="mic-test-feedback" aria-live="polite">
           <strong>{props.micTestCountdown}</strong>
@@ -1034,7 +1253,7 @@ function SpeechSettings(props: {
       ) : null}
       {props.speechTestResult ? (
         <div className="speech-test-result">
-          <strong>测试转录结果</strong>
+          <strong>{t("speech.result")}</strong>
           <p>{props.speechTestResult}</p>
         </div>
       ) : null}
@@ -1051,9 +1270,12 @@ function ModeSettings({
   onModes: (modes: Mode[]) => void;
   onSave: () => void;
 }) {
+  const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState(modes[0]?.id || "");
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
   const selectedMode = modes.find((mode) => mode.id === selectedId) || modes[0];
+  const officialModes = modes.filter((mode) => mode.source === "official");
+  const customModes = modes.filter((mode) => mode.source === "custom");
+  const canSave = modes.some((mode) => mode.enabled);
 
   useEffect(() => {
     if (!modes.length) return;
@@ -1062,15 +1284,10 @@ function ModeSettings({
     }
   }, [modes, selectedId]);
 
-  function nextId(name: string, excludeId = "") {
-    const base = (name || "custom_mode")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, "_")
-      .replace(/^_+|_+$/g, "") || "custom_mode";
+  function nextId(base = "custom_mode") {
     let candidate = base;
     let index = 2;
-    while (modes.some((mode) => mode.id === candidate && mode.id !== excludeId)) {
+    while (modes.some((mode) => mode.id === candidate)) {
       candidate = `${base}_${index}`;
       index += 1;
     }
@@ -1078,14 +1295,18 @@ function ModeSettings({
   }
 
   function addMode() {
-    const id = nextId("custom_mode");
+    const id = nextId();
     const mode: Mode = {
       id,
-      name: "custom_mode",
+      name: t("modes.newCustomName"),
       target: id,
       description: "",
-      system_prompt: "请将用户的语音转录整理成清晰、可执行的提示词。",
-      output_hint: ""
+      system_prompt: t("modes.defaultPrompt"),
+      output_hint: "",
+      source: "custom",
+      enabled: true,
+      icon: "sparkles",
+      base_mode_id: ""
     };
     onModes([...modes, mode]);
     setSelectedId(id);
@@ -1096,38 +1317,70 @@ function ModeSettings({
     onModes(modes.map((mode) => (mode.id === selectedMode.id ? { ...mode, ...patch } : mode)));
   }
 
-  function deleteMode(id: string) {
-    if (modes.length <= 1) return;
-    const nextModes = modes.filter((mode) => mode.id !== id);
+  function toggleMode(modeId: string, enabled: boolean) {
+    onModes(modes.map((mode) => (mode.id === modeId ? { ...mode, enabled } : mode)));
+  }
+
+  function deleteMode(modeId: string) {
+    const nextModes = modes.filter((mode) => mode.id !== modeId);
     onModes(nextModes);
     setSelectedId(nextModes[0]?.id || "");
   }
 
-  function dropMode(targetIndex: number) {
-    if (dragIndex === null || dragIndex === targetIndex) return;
+  function moveMode(modeId: string, delta: number) {
+    const mode = modes.find((item) => item.id === modeId);
+    if (!mode) return;
+    const peerIndexes = modes
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.source === mode.source)
+      .map(({ index }) => index);
+    const currentPeerIndex = peerIndexes.indexOf(modes.findIndex((item) => item.id === modeId));
+    const nextPeerIndex = currentPeerIndex + delta;
+    if (nextPeerIndex < 0 || nextPeerIndex >= peerIndexes.length) return;
+    const fromIndex = peerIndexes[currentPeerIndex];
+    const toIndex = peerIndexes[nextPeerIndex];
     const nextModes = [...modes];
-    const [moved] = nextModes.splice(dragIndex, 1);
-    nextModes.splice(targetIndex, 0, moved);
+    [nextModes[fromIndex], nextModes[toIndex]] = [nextModes[toIndex], nextModes[fromIndex]];
     onModes(nextModes);
-    setDragIndex(null);
   }
 
-  function moveMode(fromIndex: number, delta: number) {
-    const targetIndex = fromIndex + delta;
-    if (targetIndex < 0 || targetIndex >= modes.length) return;
-    const nextModes = [...modes];
-    const [moved] = nextModes.splice(fromIndex, 1);
-    nextModes.splice(targetIndex, 0, moved);
-    onModes(nextModes);
+  function renderGroup(source: Mode["source"], groupModes: Mode[]) {
+    const official = source === "official";
+    return (
+      <section className={`mode-source-group ${source}`}>
+        <header>
+          <span>{official ? <ListChecks size={14} /> : <Sparkles size={14} />}</span>
+          <strong>{official ? t("modes.official") : t("modes.custom")}</strong>
+          <small>{groupModes.length}</small>
+        </header>
+        {groupModes.length === 0 ? <p>{t("modes.customEmpty")}</p> : null}
+        {groupModes.map((mode, index) => (
+          <div className={`mode-list-item ${mode.id === selectedMode?.id ? "active" : ""} ${mode.enabled ? "" : "disabled"}`} key={mode.id}>
+            <button className="mode-list-select" onClick={() => setSelectedId(mode.id)}>
+              <span className={`mode-list-icon ${mode.source}`}><ModeGlyph mode={mode} size={15} /></span>
+              <span>
+                <strong>{modeDisplayName(mode, t)}</strong>
+                <small>{mode.base_mode_id ? t("modes.privateCopy") : mode.id}</small>
+              </span>
+            </button>
+            <span className="mode-order-buttons">
+              <button title={t("modes.moveUp")} disabled={index === 0} onClick={() => moveMode(mode.id, -1)}><ArrowUp size={13} /></button>
+              <button title={t("modes.moveDown")} disabled={index === groupModes.length - 1} onClick={() => moveMode(mode.id, 1)}><ArrowDown size={13} /></button>
+            </span>
+            <label className="mode-enable-toggle" title={mode.enabled ? t("modes.enabled") : t("modes.disabled")}>
+              <input type="checkbox" checked={mode.enabled} onChange={(event) => toggleMode(mode.id, event.target.checked)} />
+              <span />
+            </label>
+          </div>
+        ))}
+      </section>
+    );
   }
 
   if (!selectedMode) {
     return (
       <div className="settings-body">
-        <button onClick={addMode}>
-          <Plus size={15} />
-          <span>添加模式</span>
-        </button>
+        <button onClick={addMode}><Plus size={15} /><span>{t("modes.addMode")}</span></button>
       </div>
     );
   }
@@ -1136,68 +1389,42 @@ function ModeSettings({
     <div className="mode-manager">
       <section className="mode-list">
         <div className="button-row">
-          <button onClick={addMode}>
-            <Plus size={15} />
-            <span>添加</span>
-          </button>
-          <button onClick={onSave}>
-            <Check size={15} />
-            <span>保存</span>
-          </button>
+          <button onClick={addMode}><Plus size={15} /><span>{t("common.add")}</span></button>
+          <button disabled={!canSave} onClick={onSave}><Check size={15} /><span>{t("common.save")}</span></button>
         </div>
-        {modes.map((mode, index) => (
-          <button
-            className={`mode-list-item ${mode.id === selectedMode.id ? "active" : ""}`}
-            draggable
-            key={mode.id}
-            onClick={() => setSelectedId(mode.id)}
-            onDragStart={() => setDragIndex(index)}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={() => dropMode(index)}
-          >
-            <GripVertical size={15} />
-            <span>
-              <strong>{mode.name}</strong>
-              <small>{index === 0 ? "默认模式" : mode.id}</small>
-            </span>
-            <em>
-              <b onClick={(event) => { event.stopPropagation(); moveMode(index, -1); }}>↑</b>
-              <b onClick={(event) => { event.stopPropagation(); moveMode(index, 1); }}>↓</b>
-            </em>
-          </button>
-        ))}
+        {!canSave ? <p className="mode-validation">{t("modes.atLeastOne")}</p> : null}
+        {renderGroup("official", officialModes)}
+        {renderGroup("custom", customModes)}
       </section>
 
       <section className="mode-editor settings-body">
+        <div className={`mode-source-banner ${selectedMode.source}`}>
+          <ModeGlyph mode={selectedMode} size={17} />
+          <span>
+            <strong>{selectedMode.source === "official" ? t("modes.official") : t("modes.custom")}</strong>
+            <small>{selectedMode.source === "official" ? t("modes.officialNote") : t("modes.customNote")}</small>
+          </span>
+        </div>
         <label>
-          <span>模式名称</span>
-          <input
-            value={selectedMode.name}
-            onChange={(event) => {
-              const name = event.target.value;
-              const id = nextId(name, selectedMode.id);
-              updateMode({ id, name, target: name, output_hint: name });
-              setSelectedId(id);
-            }}
-          />
+          <span>{t("modes.name")}</span>
+          <input value={selectedMode.name} onChange={(event) => updateMode({ name: event.target.value })} />
         </label>
-        <label>
-          <span>描述</span>
-          <input value={selectedMode.description} onChange={(event) => updateMode({ description: event.target.value })} />
+        <label className="mode-description-field">
+          <span>{t("modes.description")}</span>
+          <textarea value={selectedMode.description} onChange={(event) => updateMode({ description: event.target.value })} />
         </label>
-        <label>
+        <label className="mode-prompt-field">
           <span>Prompt</span>
           <textarea value={selectedMode.system_prompt} onChange={(event) => updateMode({ system_prompt: event.target.value })} />
         </label>
         <div className="button-row">
-          <button onClick={onSave}>
+          <button disabled={!canSave} onClick={onSave}>
             <Check size={15} />
-            <span>保存模式</span>
+            <span>{selectedMode.source === "official" ? t("modes.savePrivate") : t("modes.saveMode")}</span>
           </button>
-          <button disabled={modes.length <= 1} onClick={() => deleteMode(selectedMode.id)}>
-            <Trash2 size={15} />
-            <span>删除</span>
-          </button>
+          {selectedMode.source === "custom" ? (
+            <button onClick={() => deleteMode(selectedMode.id)}><Trash2 size={15} /><span>{t("common.delete")}</span></button>
+          ) : null}
         </div>
       </section>
     </div>
@@ -1216,9 +1443,10 @@ function SkillSettings({
   skillScanDir: string;
   onSkillScanDir: (value: string) => void;
   onSkills: (skills: Skill[]) => void;
-  onScan: () => void;
+  onScan: (directory?: string) => void;
   onSave: () => void;
 }) {
+  const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState(skills[0]?.id || "");
   const selectedSkill = skills.find((skill) => skill.id === selectedId) || skills[0];
 
@@ -1265,28 +1493,49 @@ function SkillSettings({
     setSelectedId(nextSkills[0]?.id || "");
   }
 
+  async function chooseSkillDirectory() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: t("skills.chooseTitle")
+      });
+      if (typeof selected !== "string") return;
+      onSkillScanDir(selected);
+      onScan(selected);
+    } catch (exc) {
+      window.alert(`${t("skills.selectError")}: ${exc instanceof Error ? exc.message : String(exc)}`);
+    }
+  }
+
   return (
     <div className="skill-manager">
       <section className="skill-toolbar">
         <label>
-          <span>Skill 目录</span>
-          <input value={skillScanDir} onChange={(event) => onSkillScanDir(event.target.value)} placeholder="例如 C:\\Users\\kg\\.codex\\skills" />
+          <span>{t("skills.directory")}</span>
+          <div className="field-with-button">
+            <input readOnly value={skillScanDir} />
+            <button title={t("skills.chooseFolder")} onClick={() => void chooseSkillDirectory()}>
+              <FolderOpen size={16} />
+              <span>{t("skills.chooseFolder")}</span>
+            </button>
+          </div>
         </label>
-        <p className="skill-match-hint">AI 会结合 Skill 的名称、描述和使用示例自动判断；匹配时引用，未匹配时不会添加。</p>
+        <p className="skill-match-hint">{t("skills.hint")}</p>
         <div className="button-row">
-          <button onClick={onScan}>
+          <button onClick={() => onScan()}>
             <RefreshCcw size={15} />
-            <span>自动提取</span>
+            <span>{t("skills.extract")}</span>
           </button>
           <button onClick={addSkill}>
             <Plus size={15} />
-            <span>手动添加</span>
+            <span>{t("skills.addManual")}</span>
           </button>
         </div>
       </section>
 
       <section className="skill-list">
-        {skills.length === 0 ? <p>暂无 Skill，可输入目录自动提取，或手动添加。</p> : null}
+        {skills.length === 0 ? <p>{t("skills.empty")}</p> : null}
         {skills.map((skill) => (
           <button className={skill.id === selectedSkill?.id ? "active" : ""} key={skill.id} onClick={() => setSelectedId(skill.id)}>
             <input
@@ -1309,33 +1558,33 @@ function SkillSettings({
       {selectedSkill ? (
         <section className="skill-editor settings-body">
           <label>
-            <span>名称</span>
+            <span>{t("skills.name")}</span>
             <input value={selectedSkill.name} onChange={(event) => updateSkill({ name: event.target.value })} />
           </label>
           <label>
-            <span>分类</span>
+            <span>{t("skills.category")}</span>
             <input value={selectedSkill.category} onChange={(event) => updateSkill({ category: event.target.value })} />
           </label>
           <label>
-            <span>描述</span>
+            <span>{t("skills.description")}</span>
             <textarea value={selectedSkill.description} onChange={(event) => updateSkill({ description: event.target.value })} />
           </label>
           <label>
-            <span>使用示例</span>
+            <span>{t("skills.example")}</span>
             <textarea
               value={selectedSkill.example}
               onChange={(event) => updateSkill({ example: event.target.value })}
-              placeholder="例如：当用户要求制作演示文稿时使用"
+              placeholder={t("skills.examplePlaceholder")}
             />
           </label>
           <div className="button-row">
             <button onClick={onSave}>
               <Check size={15} />
-              <span>保存 Skill</span>
+              <span>{t("skills.saveSkill")}</span>
             </button>
             <button onClick={() => deleteSkill(selectedSkill.id)}>
               <Trash2 size={15} />
-              <span>删除</span>
+              <span>{t("common.delete")}</span>
             </button>
           </div>
         </section>
@@ -1350,6 +1599,15 @@ function GeneralSettings(props: {
   onStateChange: (state: AppState) => void;
 }) {
   const { draft, onDraft, onStateChange } = props;
+  const { t } = useTranslation();
+  const [version, setVersion] = useState("0.1.0");
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateFailed, setUpdateFailed] = useState(false);
+
+  useEffect(() => {
+    void getVersion().then(setVersion).catch(() => undefined);
+  }, []);
 
   async function setAutoCopy(checked: boolean) {
     onDraft({ ...draft, auto_copy: checked });
@@ -1380,18 +1638,55 @@ function GeneralSettings(props: {
     onStateChange(payload.state);
   }
 
+  async function setLanguage(language: UiLanguage) {
+    const next = { ...draft, ui_language: language };
+    onDraft(next);
+    await setUiLanguage(language);
+    await setTrayLanguage(language).catch(() => undefined);
+    const payload = await api.saveGeneral({ ui_language: language });
+    onStateChange(payload.state);
+  }
+
+  async function checkForUpdates() {
+    setCheckingUpdate(true);
+    setUpdateFailed(false);
+    try {
+      setUpdateResult(await checkGitHubUpdate(version));
+    } catch {
+      setUpdateResult(null);
+      setUpdateFailed(true);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
   return (
     <div className="settings-body">
+      <div className="language-setting">
+        <span>{t("general.language")}</span>
+        <div className="language-switch" role="group" aria-label={t("general.language")}>
+          {UI_LANGUAGES.map((language) => (
+            <button
+              className={draft.ui_language === language.value ? "active" : ""}
+              aria-pressed={draft.ui_language === language.value}
+              key={language.value}
+              onClick={() => void setLanguage(language.value)}
+            >
+              {language.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="theme-setting">
-        <span>界面风格</span>
-        <div className="theme-switch" role="group" aria-label="界面风格">
+        <span>{t("general.style")}</span>
+        <div className="theme-switch" role="group" aria-label={t("general.style")}>
           <button
             className={draft.ui_theme === "morning" ? "active" : ""}
             aria-pressed={draft.ui_theme === "morning"}
             onClick={() => void setTheme("morning")}
           >
             <Sun size={16} />
-            <span>晨光</span>
+            <span>{t("general.morning")}</span>
           </button>
           <button
             className={draft.ui_theme === "night" ? "active" : ""}
@@ -1399,23 +1694,55 @@ function GeneralSettings(props: {
             onClick={() => void setTheme("night")}
           >
             <Moon size={16} />
-            <span>静夜</span>
+            <span>{t("general.night")}</span>
           </button>
         </div>
       </div>
       <div className="checks">
         <label>
           <input type="checkbox" checked={draft.auto_copy} onChange={(event) => setAutoCopy(event.target.checked)} />
-          <span>自动复制</span>
+          <span>{t("general.autoCopy")}</span>
         </label>
         <label>
           <input type="checkbox" checked={draft.auto_launch} onChange={(event) => setAutoLaunch(event.target.checked)} />
-          <span>开机自启动</span>
+          <span>{t("general.autoLaunch")}</span>
         </label>
         <label>
           <input type="checkbox" checked={draft.save_history} onChange={(event) => setSaveHistory(event.target.checked)} />
-          <span>保存历史</span>
+          <span>{t("general.saveHistory")}</span>
         </label>
+      </div>
+      <div className="about-setting">
+        <span>{t("general.about")}</span>
+        <div className="about-row">
+          <div>
+            <strong>Aura</strong>
+            <small>{t("general.currentVersion")} {version}</small>
+          </div>
+          <div className="button-row">
+            <button onClick={() => void openUrl(AURA_GITHUB_URL)}>
+              <Github size={15} />
+              <span>{t("general.github")}</span>
+            </button>
+            <button disabled={checkingUpdate} onClick={() => void checkForUpdates()}>
+              <RefreshCcw size={15} />
+              <span>{checkingUpdate ? t("general.checking") : t("general.checkUpdates")}</span>
+            </button>
+          </div>
+        </div>
+        {updateFailed ? <p className="setting-hint">{t("general.updateError")}</p> : null}
+        {updateResult ? (
+          <p className="setting-hint update-result">
+            <span>{!updateResult.published
+              ? t("general.noRelease")
+              : updateResult.hasUpdate
+                ? t("general.available", { version: updateResult.latestVersion })
+                : t("general.latest")}</span>
+            {updateResult.hasUpdate ? (
+              <button onClick={() => void openUrl(updateResult.releaseUrl)}>{t("general.openRelease")}</button>
+            ) : null}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -1427,11 +1754,16 @@ function LlmSettings(props: {
   onSaveLlm: () => void;
 }) {
   const { draft, onDraft } = props;
+  const { t } = useTranslation();
   const isDeepSeek = draft.llm_provider === "deepseek" || isDeepSeekEndpoint(draft.llm_base_url);
   const isCustom = !isDeepSeek;
   const deepseekModel = deepseekModels.includes(draft.llm_model)
     ? draft.llm_model
     : "deepseek-v4-flash";
+  const apiKeyField = isCustom ? "custom_api_key" : "deepseek_api_key";
+  const apiKeySource = isCustom
+    ? draft.custom_api_key_source
+    : draft.deepseek_api_key_source;
 
   function useDeepSeek() {
     onDraft({
@@ -1456,27 +1788,27 @@ function LlmSettings(props: {
 
   return (
     <div className="settings-body llm-settings">
-      <div className="llm-source-switch" role="group" aria-label="大模型来源">
+      <div className="llm-source-switch" role="group" aria-label={t("llm.source")}>
         <button className={!isCustom ? "active" : ""} onClick={useDeepSeek}>
           <img src={deepseekLogo} alt="DeepSeek" />
-          <span><strong>DeepSeek</strong><small>默认</small></span>
+          <span><strong>DeepSeek</strong><small>{t("common.default")}</small></span>
         </button>
         <button className={isCustom ? "active" : ""} onClick={useCustom}>
           <SlidersHorizontal size={20} />
-          <span><strong>自定义接口</strong><small>OpenAI Compatible</small></span>
+          <span><strong>{t("llm.custom")}</strong><small>OpenAI Compatible</small></span>
         </button>
       </div>
 
       <label>
-        <span>API 端点</span>
+        <span>{t("llm.endpoint")}</span>
         <input
           value={draft.llm_base_url}
           onChange={(event) => onDraft({ ...draft, llm_base_url: event.target.value })}
-          placeholder={isCustom ? "例如 http://127.0.0.1:11434/v1" : "https://api.deepseek.com"}
+          placeholder={isCustom ? "http://127.0.0.1:11434/v1" : "https://api.deepseek.com"}
         />
       </label>
       <label>
-        <span>模型名称</span>
+        <span>{t("llm.modelName")}</span>
         {!isCustom ? (
           <select
             value={deepseekModel}
@@ -1493,18 +1825,29 @@ function LlmSettings(props: {
           <input
             value={draft.llm_model}
             onChange={(event) => onDraft({ ...draft, llm_model: event.target.value })}
-            placeholder="服务提供的模型 ID"
+            placeholder={t("llm.modelPlaceholder")}
           />
         )}
       </label>
       <label>
-        <span>API Key 环境变量</span>
+        <span>{isCustom ? t("llm.customKey") : t("llm.deepseekKey")}</span>
         <input
-          readOnly
-          value={draft.llm_api_key ? "AURA_LLM_API_KEY 已设置" : "AURA_LLM_API_KEY 未设置"}
+          type="password"
+          value={draft[apiKeyField] || ""}
+          onFocus={(event) => {
+            if (event.currentTarget.value === "********") {
+              event.currentTarget.select();
+            }
+          }}
+          onChange={(event) => onDraft({ ...draft, [apiKeyField]: event.target.value })}
+          placeholder={isCustom ? t("llm.customKeyPlaceholder") : t("llm.deepseekKeyPlaceholder")}
         />
       </label>
-      <p className="setting-hint">Aura 只从系统环境变量 AURA_LLM_API_KEY 读取密钥，不会写入配置文件。</p>
+      <p className="setting-hint">
+        {apiKeySource === "config"
+          ? t("llm.keySaved")
+          : t("llm.keyUnsaved")}
+      </p>
       {!isCustom ? (
         <label className="thinking-toggle">
           <input
@@ -1512,10 +1855,10 @@ function LlmSettings(props: {
             checked={draft.llm_thinking_enabled}
             onChange={(event) => onDraft({ ...draft, llm_thinking_enabled: event.target.checked })}
           />
-          <span><strong>思考模式</strong><small>默认关闭；开启后会提高复杂任务质量，但响应更慢。</small></span>
+          <span><strong>{t("llm.thinking")}</strong><small>{t("llm.thinkingNote")}</small></span>
         </label>
       ) : (
-        <p className="setting-hint">支持 OpenAI-compatible 接口，包括用户自建服务、Ollama、vLLM 或第三方网关。</p>
+        <p className="setting-hint">{t("llm.customNote")}</p>
       )}
       <div className="split-fields">
         <label>
@@ -1529,18 +1872,19 @@ function LlmSettings(props: {
       </div>
       <button onClick={props.onSaveLlm}>
         <Check size={15} />
-        <span>保存 LLM</span>
+        <span>{t("llm.save")}</span>
       </button>
     </div>
   );
 }
 
 function ShortcutsPanel() {
+  const { t } = useTranslation();
   const shortcuts = [
-    ["Ctrl+Shift+Space", "唤起并聚焦 Aura"],
-    ["Space", "Aura 主界面聚焦时按住录音，松开后转录"],
-    ["Ctrl+N", "新建会话"],
-    ["Esc", "隐藏 Aura"]
+    ["Ctrl+Shift+Space", t("shortcuts.focus")],
+    ["Space", t("shortcuts.record")],
+    ["Ctrl+N", t("shortcuts.newSession")],
+    ["Esc", t("shortcuts.hide")]
   ];
 
   return (
@@ -1564,19 +1908,20 @@ function LogsPanel({
   onRefresh: () => Promise<LogEntry[]>;
   onClear: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="settings-body log-list">
       <div className="button-row">
         <button onClick={() => void onRefresh()}>
           <RefreshCcw size={15} />
-          <span>刷新</span>
+          <span>{t("common.refresh")}</span>
         </button>
         <button onClick={onClear}>
           <Trash2 size={15} />
-          <span>清空</span>
+          <span>{t("common.clear")}</span>
         </button>
       </div>
-      {logs.length === 0 ? <p>暂无日志</p> : null}
+      {logs.length === 0 ? <p>{t("logs.empty")}</p> : null}
       {logs.map((entry) => (
         <article className={`log-entry ${entry.level}`} key={entry.id}>
           <div>
@@ -1601,24 +1946,25 @@ function HistoryPanel({
   onClear: () => void;
   onDelete: (sessionId: string) => void;
 }) {
+  const { t, i18n } = useTranslation();
   return (
     <div className="settings-body history-list">
       <button onClick={onClear}>
         <Trash2 size={15} />
-        <span>清空历史</span>
+        <span>{t("history.clear")}</span>
       </button>
-      {state.history.length === 0 ? <p>暂无历史</p> : null}
+      {state.history.length === 0 ? <p>{t("history.empty")}</p> : null}
       {state.history.map((item) => (
         <article key={item.id}>
           <div className="history-item-head">
             <strong>{item.title}</strong>
-            <button title="删除这条历史记录" onClick={() => onDelete(item.id)}>
+            <button title={t("history.deleteTitle")} onClick={() => onDelete(item.id)}>
               <Trash2 size={14} />
             </button>
           </div>
-          <span>{item.mode_id} · {item.turn_count} turns</span>
-          <time>{shortTime(item.updated_at)}</time>
-          <p>{compactText(item.last_transcript || item.last_compiled || "无内容", 90)}</p>
+          <span>{item.mode_id} · {t("history.turns", { count: item.turn_count })}</span>
+          <time>{shortTime(item.updated_at, i18n.language)}</time>
+          <p>{compactText(item.last_transcript || item.last_compiled || t("common.noContent"), 90)}</p>
         </article>
       ))}
     </div>

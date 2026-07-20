@@ -16,14 +16,9 @@ LOCAL_CONFIG_NAME = "config.local.json"
 LOCAL_DATA_DIR_NAME = ".aura-local"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
-LLM_API_KEY_ENV = "AURA_LLM_API_KEY"
 SUPPORTED_STT_PROVIDERS = {"sensevoice-small", "whisper-large-v3"}
 SUPPORTED_UI_THEMES = {"morning", "night"}
-
-
-def environment_llm_api_key() -> str:
-    """Return Aura's explicit API key override without importing provider-specific variables."""
-    return os.environ.get(LLM_API_KEY_ENV, "").strip()
+SUPPORTED_UI_LANGUAGES = {"zh-CN", "zh-TW", "en", "ja"}
 
 
 def is_deepseek_endpoint(value: str) -> bool:
@@ -47,7 +42,11 @@ def project_root() -> Path:
 
 
 class SettingsStore:
-    def __init__(self, path: Path | None = None, legacy_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        legacy_dir: Path | None = None,
+    ) -> None:
         self.root_dir = path.parent.resolve() if path else project_root()
         self.path = path.resolve() if path else self.root_dir / LOCAL_CONFIG_NAME
         self.data_dir = self.root_dir / LOCAL_DATA_DIR_NAME
@@ -55,7 +54,6 @@ class SettingsStore:
         self.legacy_dir = legacy_dir or (
             legacy_app_data_dir() if path is None else self.root_dir / ".legacy-aura"
         )
-
     def clear_all_data(self) -> bool:
         """Delete project-local settings and history. Returns True if successful."""
         try:
@@ -95,6 +93,14 @@ class SettingsStore:
         raw_history_path = data.get("history_path")
         source_history = Path(raw_history_path) if raw_history_path else self.legacy_dir / "history.sqlite"
         self._copy_history(source_history)
+        legacy_key = str(data.get("llm_api_key") or "").strip()
+        configured_base_url = str(data.get("llm_base_url") or "")
+        is_deepseek = data.get("llm_provider") != "openai_compatible"
+        if configured_base_url:
+            is_deepseek = is_deepseek_endpoint(configured_base_url)
+        if legacy_key:
+            field = "deepseek_api_key" if is_deepseek else "custom_api_key"
+            data.setdefault(field, legacy_key)
         data["history_path"] = str(self.history_path)
         if data.get("mode_id") in {"concise", "professional"}:
             data["mode_id"] = "coding_agent"
@@ -131,6 +137,8 @@ class SettingsStore:
             data["llm_thinking_enabled"] = False
 
         for key, value in data.items():
+            if key == "llm_api_key":
+                continue
             if hasattr(settings, key):
                 if key in {"history_path", "model_cache_dir"} and value:
                     value = Path(value)
@@ -154,7 +162,15 @@ class SettingsStore:
             settings.stt_provider = "sensevoice-small"
         if settings.ui_theme not in SUPPORTED_UI_THEMES:
             settings.ui_theme = "morning"
-        settings.llm_api_key = environment_llm_api_key()
+        if settings.ui_language not in SUPPORTED_UI_LANGUAGES:
+            settings.ui_language = "zh-CN"
+
+        legacy_key = str(data.get("llm_api_key") or "").strip()
+        if legacy_key:
+            if settings.llm_provider == "deepseek" and not settings.deepseek_api_key:
+                settings.deepseek_api_key = legacy_key
+            elif settings.llm_provider != "deepseek" and not settings.custom_api_key:
+                settings.custom_api_key = legacy_key
         if "llm_api_key" in data:
             self.save(settings)
         return settings
@@ -178,7 +194,6 @@ class SettingsStore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         settings.history_path = self.history_path
         payload: dict[str, Any] = asdict(settings)
-        payload.pop("llm_api_key", None)
         if payload.get("history_path"):
             payload["history_path"] = str(payload["history_path"])
         if payload.get("model_cache_dir"):
