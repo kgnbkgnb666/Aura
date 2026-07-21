@@ -104,7 +104,7 @@ Aura の中心は、音声の意図・目的・制約を理解し、テキスト
 
 標準は思考モードをオフにした `deepseek-v4-flash` です。難しいタスクでは `deepseek-v4-pro` または思考モードを選べます。
 
-> 🔐 Key はローカルの `config.local.json` に平文で保存されます。Git の管理対象外ですが、共有・アップロードはしないでください。
+> 🔐 開発環境では Key はプロジェクト直下の `config.local.json` に保存されます。Windows のパッケージ版では `%LOCALAPPDATA%\Aura\config.local.json` に保存され、インストーラーには含まれません。いずれも平文のため共有・アップロードはしないでください。
 
 ### 🔌 カスタム LLM 接続
 
@@ -181,7 +181,7 @@ UI には現在 2 Provider があり、任意のモデルファイルを自動�
 | ローカルサービス | Python Sidecar + Local HTTP API：録音、STT、セッション、ストリーム処理 |
 | 音声 | PyAudio、FunASR / SenseVoice、faster-whisper / CTranslate2 |
 | コンパイラ | モード、会話文脈、Skills を DeepSeek / カスタム LLM へ渡す |
-| ローカルデータ | `config.local.json`、SQLite、`.aura-local/`、モデルキャッシュ |
+| ローカルデータ | 開発時はプロジェクト直下、Windows パッケージ版では `%LOCALAPPDATA%\Aura` に設定、SQLite、プライベートモード、モデルキャッシュを保存 |
 
 ## 📈 Star の推移
 
@@ -192,6 +192,16 @@ UI には現在 2 Provider があり、任意のモデルファイルを自動�
 ```
 
 ## 🛠️ 開発
+
+### バージョン管理
+
+`package.json` を唯一のバージョンソースとして、次の 1 コマンドで全ファイルを同期できます。
+
+```powershell
+npm run release:version -- 0.1.3
+```
+
+`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` を更新します。`npm run tauri:build` 実行時にも Tauri と Cargo のバージョンを自動同期します。
 
 ```powershell
 npm run build

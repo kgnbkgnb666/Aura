@@ -1,5 +1,6 @@
 import json
 
+import aura.config as config_module
 from aura.config import SettingsStore
 
 
@@ -20,6 +21,23 @@ def test_new_local_config_defaults_to_standard_and_ignores_provider_api_key_env(
     assert settings.llm_thinking_enabled is False
     assert settings.history_path == tmp_path / ".aura-local" / "history.sqlite"
     assert store.path.exists()
+
+
+def test_frozen_app_uses_local_appdata_instead_of_install_directory(tmp_path, monkeypatch):
+    install_dir = tmp_path / "Program Files" / "Aura"
+    local_appdata = tmp_path / "LocalAppData"
+    install_dir.mkdir(parents=True)
+    monkeypatch.setattr(config_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(config_module.sys, "executable", str(install_dir / "aura-sidecar.exe"))
+    monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
+
+    store = SettingsStore()
+    settings = store.load()
+
+    assert store.root_dir == local_appdata / "Aura"
+    assert store.path == local_appdata / "Aura" / "config.local.json"
+    assert settings.history_path == local_appdata / "Aura" / ".aura-local" / "history.sqlite"
+    assert not (install_dir / "config.local.json").exists()
 
 
 def test_legacy_aura_api_key_environment_variable_is_ignored(tmp_path, monkeypatch):

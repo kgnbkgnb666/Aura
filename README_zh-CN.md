@@ -123,7 +123,7 @@ Aura 的主要任务是理解口语、提取目标与约束、重组文本，并
 
 项目默认使用 `deepseek-v4-flash` 并关闭思考模式；复杂任务可以切换 `deepseek-v4-pro` 或开启思考模式。模型名称以 DeepSeek 实际可用列表为准。
 
-> 🔐 API Key 保存在本机 `config.local.json`，该文件已被 Git 忽略，但内容是明文，请勿上传或分享。
+> 🔐 源码开发时，API Key 保存在项目根目录的 `config.local.json`；Windows 安装版保存在 `%LOCALAPPDATA%\Aura\config.local.json`，绝不会进入安装包。两者均为明文，请勿上传或分享。
 
 ### 🔌 自定义 LLM 接口
 
@@ -229,9 +229,19 @@ python -m pip install -U modelscope huggingface_hub
 | 本地服务 | Python Sidecar + 本地 HTTP API，编排录音、转写、会话与流式输出 |
 | 语音层 | PyAudio、FunASR / SenseVoice、faster-whisper / CTranslate2 |
 | 编译层 | 模式 Prompt + 会话上下文 + Skills，调用 DeepSeek 或自定义 LLM |
-| 本地数据 | `config.local.json`、SQLite 历史、`.aura-local/` 私人资产、模型缓存 |
+| 本地数据 | 源码开发使用项目根目录；Windows 安装版使用 `%LOCALAPPDATA%\Aura` 保存配置、SQLite 历史、私人模式与模型缓存 |
 
 ## 🛠️ 开发与验证
+
+### 版本号
+
+`package.json` 是唯一版本源，不需要手动修改三个文件：
+
+```powershell
+npm run release:version -- 0.1.3
+```
+
+该命令会同步 `package.json`、`package-lock.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml`。执行 `npm run tauri:build` 时也会自动同步 Tauri 与 Cargo 版本。
 
 ```powershell
 # 前端构建

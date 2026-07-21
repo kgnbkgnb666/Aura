@@ -53,16 +53,24 @@ The app is designed for Codex, Claude Code, Cursor, ChatGPT, and other agentic t
 ## Local Storage
 
 ```text
-config.local.json
-.aura-local/history.sqlite
-.aura-local/modes/*.yaml (user overrides only)
-models/
+Development checkout:
+  config.local.json
+  .aura-local/history.sqlite
+  .aura-local/modes/*.yaml
+  models/
+
+Packaged Windows app:
+  %LOCALAPPDATA%/Aura/config.local.json
+  %LOCALAPPDATA%/Aura/.aura-local/history.sqlite
+  %LOCALAPPDATA%/Aura/.aura-local/modes/*.yaml
+  %LOCALAPPDATA%/Aura/models/
 ```
 
 Runtime configuration, API credentials, microphone selection, skill settings, and storage paths are
-saved in `config.local.json`. Session memory is saved in `.aura-local/history.sqlite`. Both locations
-are project-local, ignored by Git, and excluded from package resource manifests. Aura does not use
-environment variables as an API credential fallback.
+saved in `config.local.json`. Session memory is saved in `.aura-local/history.sqlite`. Development
+uses the repository root; packaged builds use the current user's `%LOCALAPPDATA%/Aura` directory.
+These files are excluded from package resource manifests. Aura does not use environment variables
+as an API credential fallback.
 
 Older `%APPDATA%/Aura/config.json` and history files are copied into the project-local locations on
 first launch after an upgrade. Legacy `concise` and `professional` mode selections are mapped to

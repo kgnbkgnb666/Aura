@@ -36,7 +36,6 @@ ShowUninstDetails show
 
 ; Language (must come after pages)
 !insertmacro MUI_LANGUAGE "SimpChinese"
-!insertmacro MUI_LANGUAGE "English"
 
 ; Installer Section
 Section "Install"
@@ -90,10 +89,9 @@ Section "Uninstall"
   DeleteRegKey HKCU "${PRODUCT_UNINST_KEY}"
   DeleteRegKey HKCU "${PRODUCT_DIR_REGKEY}"
 
-  ; Runtime-created local data is never part of the installer payload.
-  MessageBox MB_YESNO|MB_ICONQUESTION "是否同时删除用户数据（配置、历史记录、API密钥）？$\n$\n数据位置: $INSTDIR\config.local.json 和 $INSTDIR\.aura-local\$\n$\n如果您计划重新安装，选择【否】可保留配置。" IDNO skip_userdata
-    Delete "$INSTDIR\config.local.json"
-    RMDir /r "$INSTDIR\.aura-local"
+  ; Runtime-created local data lives outside the installation directory.
+  MessageBox MB_YESNO|MB_ICONQUESTION "是否同时删除用户数据（配置、历史记录、API密钥和模型缓存）？$\n$\n数据位置: $LOCALAPPDATA\Aura\$\n$\n如果您计划重新安装，选择【否】可保留配置。" IDNO skip_userdata
+    RMDir /r "$LOCALAPPDATA\Aura"
     MessageBox MB_OK|MB_ICONINFORMATION "用户数据已删除。"
   skip_userdata:
 

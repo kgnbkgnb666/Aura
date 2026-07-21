@@ -36,8 +36,13 @@ def legacy_app_data_dir(app_name: str = "Aura") -> Path:
 
 def project_root() -> Path:
     if getattr(sys, "frozen", False):
-        # PyInstaller sidecar: keep local settings next to the installed executable.
-        return Path(sys.executable).resolve().parent
+        # Packaged applications must never write user data beside the executable.
+        # Keeping it under LocalAppData also prevents development secrets/history
+        # from being mistaken for installer payload or surviving in $INSTDIR.
+        root = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if root:
+            return Path(root) / "Aura"
+        return Path.home() / ".aura"
     return Path(__file__).resolve().parent.parent
 
 

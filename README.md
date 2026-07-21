@@ -116,7 +116,7 @@ Aura mainly needs to understand spoken language, extract goals and constraints, 
 
 The default is `deepseek-v4-flash` with thinking disabled. For harder work, choose `deepseek-v4-pro` or enable thinking mode. Available model names depend on your DeepSeek account and API.
 
-> 🔐 Keys are stored locally in `config.local.json`. It is ignored by Git, but it is plaintext—never upload or share it.
+> 🔐 In a development checkout, keys are stored in the project's `config.local.json`. In the packaged Windows app, they are stored at `%LOCALAPPDATA%\Aura\config.local.json`—never in the installer payload. Both are plaintext; never upload or share them.
 
 ### 🔌 Use a custom LLM endpoint
 
@@ -198,7 +198,7 @@ Editable source: [docs/assets/aura-architecture.drawio](docs/assets/aura-archite
 | Local service | Python sidecar + local HTTP API orchestrating recording, STT, sessions, and streaming |
 | Speech | PyAudio, FunASR / SenseVoice, faster-whisper / CTranslate2 |
 | Compiler | Modes, session context, and Skills sent to DeepSeek or a custom LLM |
-| Local data | `config.local.json`, SQLite history, `.aura-local/`, model cache |
+| Local data | Development: project root. Packaged Windows app: `%LOCALAPPDATA%\Aura` for config, SQLite history, private modes, and model cache |
 
 ## 📈 Star history
 
@@ -209,6 +209,16 @@ Editable source: [docs/assets/aura-architecture.drawio](docs/assets/aura-archite
 ```
 
 ## 🛠️ Development
+
+### Versioning
+
+`package.json` is the single version source. Update all package metadata with one command:
+
+```powershell
+npm run release:version -- 0.1.3
+```
+
+This synchronizes `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. `npm run tauri:build` also synchronizes Tauri and Cargo automatically before packaging.
 
 ```powershell
 npm run build

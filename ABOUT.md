@@ -10,11 +10,23 @@ Paste this into the GitHub repository **About** field:
 
 > Voice-first task shaping for AI agents — local STT, DeepSeek or any OpenAI-compatible LLM, modes, and Skill matching.
 
-Suggested topics:
+Suggested topics — add these **one at a time** in GitHub (do not paste commas):
 
 ```text
-ai-agent, speech-to-text, stt, whisper, sensevoice, deepseek, openai-compatible,
-tauri, react, python, prompt-engineering, codex, claude-code, cursor
+ai-agent
+speech-to-text
+stt
+whisper
+sensevoice
+deepseek
+openai-compatible
+tauri
+react
+python
+prompt-engineering
+codex
+claude-code
+cursor
 ```
 
 ## 中文简介
