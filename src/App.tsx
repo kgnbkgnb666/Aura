@@ -131,7 +131,8 @@ function localizeRuntimeStatus(value: string | undefined, t: TFunction): string 
     "SenseVoice-Small 模型已就绪": "runtime.sensevoiceReady",
     "正在使用 SenseVoice-Small 识别语音": "runtime.sensevoiceUsing",
     "正在使用 Whisper Large V3 识别语音": "runtime.whisperUsing",
-    "CUDA 运行库不完整，已自动切换到 CPU 模式": "runtime.cudaFallback"
+    "CUDA 运行库不完整，已自动切换到 CPU 模式": "runtime.cudaFallback",
+    "Whisper 下载失败，已自动切换回 SenseVoice Small": "runtime.whisperFallback"
   };
   if (exact[value]) return t(exact[value]);
   const recording = value.match(/^录音中\s+(.+)$/);
@@ -271,6 +272,7 @@ export default function App() {
   const [speechTestResult, setSpeechTestResult] = useState("");
   const [warmupActive, setWarmupActive] = useState(false);
   const [warmupProgress, setWarmupProgress] = useState(0);
+  const [warmupFallback, setWarmupFallback] = useState(false);
   const [bootProgress, setBootProgress] = useState(0);
   const [bootStatus, setBootStatus] = useState(() => i18n.t("boot.connecting"));
   const [bootStage, setBootStage] = useState("connecting");
@@ -343,6 +345,7 @@ export default function App() {
             : i18n.t("boot.checkingSpeech")
         );
         if (!initial.service.transcriber_ready) {
+          let trackedProvider = initial.settings.stt_provider;
           await api.warmupStt();
           while (!cancelled) {
             initial = await api.state();
@@ -350,6 +353,13 @@ export default function App() {
             setBootStage(initial.service.transcriber_status);
             setBootStatus(localizeRuntimeStatus(initial.runtime.status, i18n.t.bind(i18n)) || i18n.t("boot.loadingSpeech"));
             if (initial.service.transcriber_ready) break;
+            // Detect fallback: provider changed → backend switched models automatically.
+            // The status bar will show the fallback message naturally via runtime.status.
+            if (initial.settings.stt_provider !== trackedProvider) {
+              trackedProvider = initial.settings.stt_provider;
+              setBootStatus(localizeRuntimeStatus(initial.runtime.status, i18n.t.bind(i18n)) || i18n.t("boot.loadingSpeech"));
+              continue;
+            }
             if (initial.service.transcriber_status === "error") {
               throw new Error(initial.service.transcriber_error || initial.runtime.status || i18n.t("boot.speechFailed"));
             }
@@ -786,6 +796,7 @@ export default function App() {
   async function warmup() {
     setWarmupActive(true);
     setWarmupProgress(0);
+    setWarmupFallback(false);
     setError("");
     try {
       const payload = await api.warmupStt();
@@ -795,6 +806,7 @@ export default function App() {
         setWarmupActive(false);
         return;
       }
+      let trackedProvider = payload.state.settings.stt_provider;
       while (true) {
         const current = await api.state();
         setState(current);
@@ -802,6 +814,13 @@ export default function App() {
         if (current.service.transcriber_ready) {
           setWarmupProgress(100);
           break;
+        }
+        // Detect fallback: provider changed → backend switched models automatically.
+        if (current.settings.stt_provider !== trackedProvider) {
+          trackedProvider = current.settings.stt_provider;
+          setWarmupFallback(true);
+          setDraft(current.settings);
+          continue;
         }
         if (current.service.transcriber_status === "error") {
           throw new Error(current.service.transcriber_error || t("speech.preloadError"));
@@ -889,6 +908,8 @@ export default function App() {
 
   function openSettings(tab: Tab = "general") {
     if (state) {
+      // Sync stt_provider in case backend fell back to another model in the background.
+      setDraft((prev) => ({ ...prev, stt_provider: state.settings.stt_provider }));
       setModeDrafts(state.modes);
       setSkillDrafts(stateSkills(state));
       setSkillScanDir(state.settings.skill_scan_dir || "");
@@ -989,6 +1010,7 @@ export default function App() {
                 speechTestResult={speechTestResult}
                 warmupActive={warmupActive}
                 warmupProgress={warmupProgress}
+                warmupFallback={warmupFallback}
                 onDraft={setDraft}
                 onSave={saveSpeech}
                 onWarmup={warmup}
@@ -1147,6 +1169,7 @@ function SpeechSettings(props: {
   speechTestResult: string;
   warmupActive: boolean;
   warmupProgress: number;
+  warmupFallback: boolean;
   onDraft: (settings: Settings) => void;
   onSave: (settings: Settings) => void;
   onWarmup: () => void;
@@ -1224,10 +1247,15 @@ function SpeechSettings(props: {
         <span>{props.warmupActive ? t("speech.preloading") : t("speech.preload")}</span>
       </button>
       {props.warmupActive ? (
-        <div className="boot-progress" role="progressbar" aria-label={t("speech.modelProgress")}
-          aria-valuemin={0} aria-valuemax={100} aria-valuenow={props.warmupProgress}>
-          <i style={{ width: `${Math.max(props.warmupProgress, 5)}%` }} />
-        </div>
+        <>
+          <div className="boot-progress" role="progressbar" aria-label={t("speech.modelProgress")}
+            aria-valuemin={0} aria-valuemax={100} aria-valuenow={props.warmupProgress}>
+            <i style={{ width: `${Math.max(props.warmupProgress, 5)}%` }} />
+          </div>
+          {props.warmupFallback ? (
+            <p className="warmup-fallback-hint">{t("runtime.whisperFallback")}</p>
+          ) : null}
+        </>
       ) : null}
       {props.micTestActive ? (
         <div className="mic-test-feedback" aria-live="polite">

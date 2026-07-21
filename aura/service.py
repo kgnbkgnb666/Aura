@@ -19,11 +19,46 @@ from .session import SessionManager
 TextCallback = Callable[[str], None]
 
 
+def _is_network_error(exc: Exception) -> bool:
+    """Detect network-related errors from huggingface_hub, requests, urllib, etc."""
+    message = str(exc).lower()
+    exc_type_name = type(exc).__qualname__.lower()
+
+    type_patterns = (
+        "connecttimeout", "connecterror", "connectionerror",
+        "timeout", "httperror", "localentrynotfounderror",
+        "connectionrefusederror", "urlerror", "gaierror",
+        "remotedisconnected", "protocolerror",
+    )
+    for pattern in type_patterns:
+        if pattern in exc_type_name:
+            return True
+
+    message_patterns = (
+        "connect timeout", "connection refused", "connection reset",
+        "name or service not known", "network is unreachable",
+        "no route to host", "temporary failure in name resolution",
+        "timed out", "timeout", "could not resolve host",
+        "failed to establish a new connection",
+        "max retries exceeded", "nodename nor servname",
+        "getaddrinfo failed",
+    )
+    for pattern in message_patterns:
+        if pattern in message:
+            return True
+
+    if "401" in message or "403" in message or "404" in message:
+        return True
+
+    return False
+
+
 class AuraService:
     def __init__(
         self,
         settings: Settings | None = None,
         modes: ModeRegistry | None = None,
+        settings_store: SettingsStore | None = None,
     ) -> None:
         self.settings = settings or SettingsStore().load()
         self.modes = modes or ModeRegistry().load()
@@ -35,6 +70,7 @@ class AuraService:
         self._warmup_lock = threading.Lock()
         self._warmup_thread: threading.Thread | None = None
         self._warmup_generation = 0
+        self._settings_store = settings_store
 
     @property
     def current_session(self) -> Session:
@@ -112,33 +148,93 @@ class AuraService:
             return
         self.transcriber.load_model(status_callback=on_status)
 
-    def warm_up_transcriber_background(self, on_status: TextCallback | None = None) -> None:
+    def warm_up_transcriber_background(
+        self,
+        on_status: TextCallback | None = None,
+        on_fallback: TextCallback | None = None,
+    ) -> None:
         with self._warmup_lock:
-            transcriber = self.transcriber
-            generation = self._warmup_generation
-            if transcriber.is_ready:
+            # Mutable wrappers so the closure sees updated values after fallback.
+            _generation = [self._warmup_generation]
+            _transcriber = [self.transcriber]
+            if _transcriber[0].is_ready:
                 if on_status:
-                    on_status(f"{transcriber.name} 模型已就绪")
+                    on_status(f"{_transcriber[0].name} 模型已就绪")
                 return
             if self._warmup_thread and self._warmup_thread.is_alive():
                 return
 
             def report_status(message: str) -> None:
                 with self._warmup_lock:
-                    if generation != self._warmup_generation or transcriber is not self.transcriber:
+                    if _generation[0] != self._warmup_generation or _transcriber[0] is not self.transcriber:
                         return
                 if on_status:
                     on_status(message)
 
             def work() -> None:
+                logger = logging.getLogger("aura")
                 try:
-                    transcriber.load_model(status_callback=report_status)
+                    _transcriber[0].load_model(status_callback=report_status)
                 except Exception as exc:
                     tb = traceback.format_exc()
-                    logging.getLogger("aura").error(
-                        "STT model warmup failed: %s\n%s", exc, tb
-                    )
-                    report_status(f"{transcriber.name} 模型加载失败: {exc}")
+                    logger.error("STT model warmup failed: %s\n%s", exc, tb)
+                    report_status(f"{_transcriber[0].name} 模型加载失败: {str(exc)[:100]}")
+
+                    # Only fallback from whisper-large-v3 — SenseVoice has no fallback target.
+                    if _transcriber[0].name != "whisper-large-v3":
+                        return
+
+                    if not _is_network_error(exc):
+                        return
+
+                    fallback_model = None
+                    with self._warmup_lock:
+                        if _generation[0] != self._warmup_generation:
+                            return  # Another warmup started, abandon fallback
+                        if _transcriber[0] is not self.transcriber:
+                            return  # Transcriber already replaced
+
+                        self.settings.stt_provider = "sensevoice-small"
+                        fallback_model = SenseVoiceSmallTranscriber(
+                            cache_dir=self.settings.model_cache_dir,
+                        )
+                        self.transcriber = fallback_model
+                        self._warmup_generation += 1
+                        _generation[0] = self._warmup_generation
+                        _transcriber[0] = fallback_model
+                        self._warmup_thread = None
+
+                    # Persist the fallback so next boot uses SenseVoice directly.
+                    if self._settings_store:
+                        try:
+                            self._settings_store.save(self.settings)
+                        except Exception as save_exc:
+                            logger.warning("Failed to persist fallback setting: %s", save_exc)
+
+                    # Call on_fallback OUTSIDE the lock.
+                    if on_fallback:
+                        try:
+                            on_fallback(
+                                "Whisper 下载失败，已自动切换回 SenseVoice Small"
+                            )
+                        except Exception:
+                            pass
+
+                    # Load the fallback model OUTSIDE the lock (Lock is NOT reentrant).
+                    try:
+                        report_status(
+                            "Whisper 下载失败，已自动切换到 SenseVoice Small，正在加载..."
+                        )
+                        fallback_model.load_model(status_callback=report_status)
+                    except Exception as fallback_exc:
+                        logger.error(
+                            "SenseVoice fallback also failed: %s\n%s",
+                            fallback_exc,
+                            traceback.format_exc(),
+                        )
+                        report_status(
+                            f"SenseVoice Small 模型加载也失败: {str(fallback_exc)[:100]}"
+                        )
 
             self._warmup_thread = threading.Thread(target=work, daemon=True)
             self._warmup_thread.start()

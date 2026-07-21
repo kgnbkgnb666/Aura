@@ -36,6 +36,24 @@ def _is_cuda_library_error(exc: Exception) -> bool:
     )
 
 
+def _configure_hf_endpoint() -> str:
+    """Route HuggingFace downloads through a mirror for users in China.
+
+    By default, sets HF_ENDPOINT to hf-mirror.com and disables the Xet
+    protocol (mirrors don't support the Xet CAS server).  Users who have
+    already set HF_ENDPOINT or HF_NO_MIRROR keep their own configuration.
+    """
+    if os.environ.get("HF_ENDPOINT"):
+        return os.environ["HF_ENDPOINT"]
+    if os.environ.get("HF_NO_MIRROR", "").strip() in ("1", "true", "yes"):
+        return "https://huggingface.co"
+    mirror = os.environ.get("HF_MIRROR", "https://hf-mirror.com")
+    os.environ["HF_ENDPOINT"] = mirror
+    if not os.environ.get("HF_HUB_DISABLE_XET"):
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+    return mirror
+
+
 class WhisperLargeV3Transcriber:
     name = "whisper-large-v3"
 
@@ -81,6 +99,10 @@ class WhisperLargeV3Transcriber:
             try:
                 from faster_whisper import WhisperModel
                 import ctranslate2
+
+                endpoint = _configure_hf_endpoint()
+                logger = logging.getLogger("aura")
+                logger.info("Whisper HF endpoint: %s", endpoint)
 
                 has_cuda = ctranslate2.get_cuda_device_count() > 0 and _cuda_runtime_available()
                 device = "cuda" if has_cuda else "cpu"

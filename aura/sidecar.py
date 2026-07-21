@@ -220,6 +220,7 @@ class AuraSidecar:
         self.service = AuraService(
             settings=self.settings_store.load(),
             modes=ModeRegistry(local_modes_dir=self.settings_store.data_dir / "modes").load(),
+            settings_store=self.settings_store,
         )
         self.logs = RuntimeLog()
         self.jobs = ProcessingJobStore()
@@ -283,6 +284,11 @@ class AuraSidecar:
         with self._lock:
             self.latest_volume = volume
             self.latest_status = f"录音中 {volume:.0f}"
+
+    def _on_stt_fallback(self, message: str) -> None:
+        """Called when STT warmup falls back from Whisper to SenseVoice."""
+        self.set_status(message, level="warning", source="stt")
+        self.logs.warning("stt", message)
 
     def list_devices(self) -> JsonDict:
         devices = [device_payload(device) for device in AudioRecorder.list_input_devices()]
@@ -486,7 +492,10 @@ class AuraSidecar:
             )
             if settings.model_cache_dir != previous_cache_dir or settings.stt_provider != previous_provider:
                 self.service.replace_transcriber()
-                self.service.warm_up_transcriber_background(on_status=self.set_status)
+                self.service.warm_up_transcriber_background(
+                    on_status=self.set_status,
+                    on_fallback=self._on_stt_fallback,
+                )
             self.settings_store.save(settings)
             self.latest_status = "语音设置已保存"
             self.logs.info("settings", "Speech settings saved")
@@ -535,7 +544,10 @@ class AuraSidecar:
     def warm_up_stt(self) -> JsonDict:
         self.set_status("正在预加载转录模型")
         self.logs.info("stt", "STT preload requested")
-        self.service.warm_up_transcriber_background(on_status=self.set_status)
+        self.service.warm_up_transcriber_background(
+            on_status=self.set_status,
+            on_fallback=self._on_stt_fallback,
+        )
         return {"state": self.state()}
 
     def start_recording(self) -> JsonDict:

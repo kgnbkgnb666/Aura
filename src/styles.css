@@ -1500,3 +1500,18 @@ textarea[readonly] {
     border-top: 1px solid #d9ddd8;
   }
 }
+
+/* ---- warmup fallback hint ---- */
+.warmup-fallback-hint {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: #b06000;
+  background: #fff7e6;
+  border-radius: 5px;
+  padding: 6px 10px;
+}
+
+:root[data-theme="night"] .warmup-fallback-hint {
+  color: #e7a840;
+  background: #2d2000;
+}
