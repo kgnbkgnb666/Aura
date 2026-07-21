@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="760" viewBox="0 0 1440 760" role="img" aria-labelledby="title desc">
+  <title id="title">Aura 技术架构图</title>
+  <desc id="desc">从用户语音到本地录音、STT 转写、Prompt 编译、LLM 整理及 Agent 执行的数据流。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fbff"/>
+      <stop offset="1" stop-color="#f5f3ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#64748b" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title{font:700 30px Inter,"Microsoft YaHei",sans-serif;fill:#172033}.subtitle{font:400 15px Inter,"Microsoft YaHei",sans-serif;fill:#64748b}.lane{fill:#fff;stroke:#dbe4f0;stroke-width:2}.lane-title{font:700 17px Inter,"Microsoft YaHei",sans-serif;fill:#334155}.box{stroke-width:2;filter:url(#shadow)}.box-title{font:700 18px Inter,"Microsoft YaHei",sans-serif;fill:#172033}.box-sub{font:400 13px Inter,"Microsoft YaHei",sans-serif;fill:#526176}.edge{fill:none;stroke:#64748b;stroke-width:3;marker-end:url(#arrow)}.edge-label{font:600 12px Inter,"Microsoft YaHei",sans-serif;fill:#64748b}.pill{font:600 12px Inter,"Microsoft YaHei",sans-serif;fill:#475569}
+    </style>
+  </defs>
+  <rect width="1440" height="760" rx="28" fill="url(#bg)"/>
+  <text x="720" y="48" text-anchor="middle" class="title">Aura · 从语音想法到可执行 Agent 任务</text>
+  <text x="720" y="76" text-anchor="middle" class="subtitle">隐私优先的本地 STT + 可替换 LLM + 模式与 Skills 编译层</text>
+
+  <rect x="36" y="108" width="1368" height="134" rx="20" class="lane"/>
+  <text x="62" y="137" class="lane-title">交互层 · Tauri 2 / React 18 / TypeScript</text>
+  <rect x="90" y="158" width="220" height="62" rx="16" fill="#dbeafe" stroke="#60a5fa" class="box"/>
+  <text x="200" y="184" text-anchor="middle" class="box-title">🎙️ 用户语音</text><text x="200" y="204" text-anchor="middle" class="box-sub">按住 Space / 麦克风输入</text>
+  <rect x="438" y="158" width="250" height="62" rx="16" fill="#e0f2fe" stroke="#38bdf8" class="box"/>
+  <text x="563" y="184" text-anchor="middle" class="box-title">🖥️ Aura 桌面界面</text><text x="563" y="204" text-anchor="middle" class="box-sub">录音交互 · 设置 · 流式结果</text>
+  <rect x="1075" y="158" width="250" height="62" rx="16" fill="#ede9fe" stroke="#8b5cf6" class="box"/>
+  <text x="1200" y="184" text-anchor="middle" class="box-title">🤖 Agent 工具</text><text x="1200" y="204" text-anchor="middle" class="box-sub">Codex · Claude Code · Cursor</text>
+  <path d="M310 189 H438" class="edge"/><text x="374" y="178" text-anchor="middle" class="edge-label">录音</text>
+
+  <rect x="36" y="266" width="1368" height="204" rx="20" class="lane"/>
+  <text x="62" y="295" class="lane-title">本地编排层 · Python Sidecar / Local HTTP API</text>
+  <rect x="78" y="330" width="220" height="86" rx="16" fill="#ffedd5" stroke="#fb923c" class="box"/>
+  <text x="188" y="362" text-anchor="middle" class="box-title">🎚️ AudioRecorder</text><text x="188" y="385" text-anchor="middle" class="box-sub">PyAudio · WAV · 音量检测</text>
+  <rect x="366" y="330" width="250" height="86" rx="16" fill="#dcfce7" stroke="#4ade80" class="box"/>
+  <text x="491" y="362" text-anchor="middle" class="box-title">🔒 本地 STT</text><text x="491" y="385" text-anchor="middle" class="box-sub">SenseVoice / Whisper Large V3</text>
+  <rect x="684" y="330" width="250" height="86" rx="16" fill="#fef3c7" stroke="#fbbf24" class="box"/>
+  <text x="809" y="362" text-anchor="middle" class="box-title">🧠 Prompt Compiler</text><text x="809" y="385" text-anchor="middle" class="box-sub">意图 · 约束 · 上下文 · 验收</text>
+  <rect x="1002" y="330" width="315" height="86" rx="16" fill="#ede9fe" stroke="#a78bfa" class="box"/>
+  <text x="1159" y="362" text-anchor="middle" class="box-title">☁️ LLM Provider</text><text x="1159" y="385" text-anchor="middle" class="box-sub">DeepSeek / Ollama / vLLM / 网关</text>
+  <path d="M563 220 V274 H188 V330" class="edge"/>
+  <path d="M298 373 H366" class="edge"/><text x="332" y="361" text-anchor="middle" class="edge-label">WAV</text>
+  <path d="M616 373 H684" class="edge"/><text x="650" y="361" text-anchor="middle" class="edge-label">文本</text>
+  <path d="M934 373 H1002" class="edge"/><text x="968" y="361" text-anchor="middle" class="edge-label">请求</text>
+  <path d="M1159 416 V446 H809 V416" class="edge"/><text x="983" y="440" text-anchor="middle" class="edge-label">流式整理结果</text>
+  <path d="M809 330 V286 H1200 V158" class="edge"/><text x="1040" y="277" text-anchor="middle" class="edge-label">复制清晰任务</text>
+
+  <rect x="36" y="494" width="1368" height="218" rx="20" class="lane"/>
+  <text x="62" y="523" class="lane-title">上下文与本地数据层</text>
+  <rect x="80" y="560" width="245" height="94" rx="16" fill="#eff6ff" stroke="#93c5fd" class="box"/>
+  <text x="202" y="592" text-anchor="middle" class="box-title">🎯 Modes</text><text x="202" y="616" text-anchor="middle" class="box-sub">行动 · 决策 · 创作 · 自定义</text>
+  <rect x="389" y="560" width="245" height="94" rx="16" fill="#f0fdf4" stroke="#86efac" class="box"/>
+  <text x="511" y="592" text-anchor="middle" class="box-title">🧩 Skills</text><text x="511" y="616" text-anchor="middle" class="box-sub">扫描 · 匹配 · 注入任务上下文</text>
+  <rect x="698" y="560" width="245" height="94" rx="16" fill="#fff7ed" stroke="#fdba74" class="box"/>
+  <text x="820" y="592" text-anchor="middle" class="box-title">💬 Sessions</text><text x="820" y="616" text-anchor="middle" class="box-sub">连续对话 · 合并需求 · SQLite</text>
+  <rect x="1007" y="560" width="315" height="94" rx="16" fill="#faf5ff" stroke="#d8b4fe" class="box"/>
+  <text x="1164" y="592" text-anchor="middle" class="box-title">💾 Local Assets</text><text x="1164" y="616" text-anchor="middle" class="box-sub">配置 · 模型缓存 · 私人模式 · 历史</text>
+  <path d="M202 560 V544 H760 V416" class="edge"/><path d="M511 560 V536 H780 V416" class="edge"/><path d="M820 560 V416" class="edge"/>
+  <rect x="90" y="673" width="1260" height="24" rx="12" fill="#e2e8f0"/>
+  <text x="720" y="690" text-anchor="middle" class="pill">原始语音与模型保留在本机 · 只有转写文本在启用 LLM 时发送到所选接口</text>
+</svg>
