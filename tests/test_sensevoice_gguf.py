@@ -75,7 +75,9 @@ def test_transcribe_invokes_native_runtime(tmp_path, monkeypatch):
     ]
 
 
-def test_sensevoice_small_defaults_to_gguf_runtime(tmp_path):
+def test_sensevoice_small_defaults_to_funasr_runtime(tmp_path):
+    """The default 'sensevoice-small' provider currently uses the FunASR SenseVoiceSmallTranscriber.
+    The GGUF native runtime is available as a separate opt-in provider."""
     settings = Settings(
         model_cache_dir=tmp_path,
         history_path=tmp_path / "history.sqlite",
@@ -83,7 +85,7 @@ def test_sensevoice_small_defaults_to_gguf_runtime(tmp_path):
     )
     service = AuraService(settings=settings, modes=ModeRegistry().load())
 
-    assert isinstance(service.transcriber, SenseVoiceGgufTranscriber)
+    assert isinstance(service.transcriber, SenseVoiceSmallTranscriber)
 
 
 def test_legacy_funasr_provider_remains_available(tmp_path):

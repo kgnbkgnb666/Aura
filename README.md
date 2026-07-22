@@ -237,10 +237,10 @@ If Aura helps you, please give it a ⭐ Star. Thank you! ❤️
 
 ---
 
-### 💬 Aura 技术交流群
+### 💬 Aura Community
 
-欢迎加入 QQ 技术交流群，文明讨论，共同进步！
+Join our QQ community group for technical discussions and support!
 
-<img src="qq技术交流群.jpg" alt="QQ 技术交流群" width="360" />
+<img src="qq技术交流群.jpg" alt="QQ Community Group" width="360" />
 
 </div>

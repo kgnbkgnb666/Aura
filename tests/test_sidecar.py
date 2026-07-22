@@ -487,7 +487,7 @@ def test_environment_variable_does_not_override_saved_config(tmp_path, monkeypat
 
 def test_sidecar_switches_to_whisper_large_v3(tmp_path, monkeypatch):
     app = local_app(tmp_path)
-    monkeypatch.setattr(app.service, "warm_up_transcriber_background", lambda on_status=None: None)
+    monkeypatch.setattr(app.service, "warm_up_transcriber_background", lambda on_status=None, on_fallback=None: None)
 
     payload = app.save_speech_settings({"stt_provider": "whisper-large-v3"})
 
