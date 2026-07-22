@@ -233,6 +233,8 @@ python -m pip install -U modelscope huggingface_hub
 
 ## 🛠️ 开发与验证
 
+> Windows 更新安装前请先关闭 Aura。安装器也会自动结束 `aura.exe` 和 `aura-sidecar.exe`，释放被占用的文件。
+
 ### 版本号
 
 `package.json` 是唯一版本源，不需要手动修改三个文件：
@@ -261,11 +263,7 @@ npm run build:sidecar
 
 ## 📈 Star 增长曲线
 
-> 📊 Star History 会在项目发布到正确的 **公开 GitHub 仓库** 后显示。当前仓库地址不可公开访问，第三方图表服务会返回 500；发布后把下方的 `<OWNER>/<REPO>` 替换为真实仓库即可。
-
-```md
-[![Star History Chart](https://api.star-history.com/svg?repos=<OWNER>/<REPO>&type=Date)](https://star-history.com/#<OWNER>/<REPO>&Date)
-```
+[![Star History Chart](https://api.star-history.com/svg?repos=kgnbkgnb666/Aura&type=Date)](https://star-history.com/#kgnbkgnb666/Aura&Date)
 
 <div align="center">
 
@@ -274,5 +272,13 @@ npm run build:sidecar
 如果这个项目对你有用，请给 Aura 一个 [⭐ Star](https://github.com/kgnbkgnb666/Aura)；你的支持会让更多人看到它，也会推动项目继续更新。谢谢！❤️
 
 [报告问题](https://github.com/kgnbkgnb666/Aura/issues) · [参与贡献](CONTRIBUTING.md) · [MIT License](LICENSE)
+
+---
+
+### 💬 Aura 技术交流群
+
+欢迎加入 QQ 技术交流群，文明讨论，共同进步！
+
+![QQ 技术交流群](qq技术交流群.jpg)
 
 </div>

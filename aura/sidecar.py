@@ -550,6 +550,51 @@ class AuraSidecar:
         )
         return {"state": self.state()}
 
+    def test_llm_connection(self, _payload: JsonDict) -> JsonDict:
+        """Send a minimal request to verify LLM connectivity and report the result."""
+        settings = self.service.settings
+        is_deepseek = settings.llm_provider == "deepseek" or is_deepseek_endpoint(settings.llm_base_url)
+        is_custom = not is_deepseek
+        api_key = settings.deepseek_api_key if is_deepseek else settings.custom_api_key
+        base_url = (settings.llm_base_url or "").strip()
+        model = (settings.llm_model or "").strip()
+
+        if not base_url:
+            return {"ok": False, "error": "llm.notConfigured"}
+        if is_deepseek and not api_key:
+            return {"ok": False, "error": "llm.notConfigured"}
+        if is_custom and not api_key and not (base_url and model):
+            return {"ok": False, "error": "llm.notConfigured"}
+
+        try:
+            from .providers.llm import OpenAICompatibleClient
+
+            client = OpenAICompatibleClient(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                temperature=0.0,
+                timeout_seconds=15,
+                allow_anonymous=is_custom and not api_key,
+                thinking_enabled=False if is_deepseek else None,
+            )
+            response = client.chat([
+                {"role": "user", "content": "Hello, respond with just the word: OK"}
+            ])
+            if response.strip():
+                return {"ok": True, "model": model, "provider": "deepseek" if is_deepseek else "custom"}
+            return {"ok": False, "error": "llm.emptyResponse"}
+        except Exception as exc:
+            message = str(exc)
+            lower = message.lower()
+            if "401" in lower or "unauthorized" in lower or "invalid api key" in lower:
+                return {"ok": False, "error": "llm.invalidKey"}
+            if "timeout" in lower or "timed out" in lower:
+                return {"ok": False, "error": "llm.timeout"}
+            if "connection" in lower or "refused" in lower or "resolve" in lower or "not configured" in lower:
+                return {"ok": False, "error": "llm.connectionError"}
+            return {"ok": False, "error": message[:200]}
+
     def start_recording(self) -> JsonDict:
         with self._lock:
             if self.recorder is not None:
@@ -602,6 +647,18 @@ class AuraSidecar:
     def _process_recording_job(self, job_id: str, wav_path: Path) -> None:
         try:
             transcript = self.service.transcribe(wav_path, on_status=self.set_status).strip()
+            if not transcript:
+                self._update_job(
+                    job_id,
+                    transcript="",
+                    compiled="",
+                    phase="done",
+                    done=True,
+                    error="transcriber.recordingTooQuiet",
+                )
+                self.set_status("未检测到有效语音，请靠近麦克风重试。")
+                self.logs.warning("stt", "Empty transcription – possible microphone or input-device issue")
+                return
             self._update_job(job_id, transcript=transcript, phase="compiling")
             self.logs.info("stt", "Transcript ready", transcript)
             self.set_status("正在整理")
@@ -610,13 +667,41 @@ class AuraSidecar:
                 transcript,
                 on_chunk=lambda chunk: self._append_job_chunk(job_id, chunk),
             ).strip()
+
+            # When falling back to RuleBasedCompiler (no API key), the output is
+            # a fixed structural template that looks misleadingly real. Replace it
+            # with a clear prompt asking the user to configure their API key.
+            if self.service.compiler.llm.name == "rule_based":
+                self._update_job(
+                    job_id,
+                    transcript=transcript,
+                    compiled="",
+                    phase="done",
+                    done=True,
+                    error="llm.notConfigured",
+                )
+                self.set_status("LLM 未配置，请在设置中填写 API Key")
+                self.logs.warning("llm", "RuleBasedCompiler blocked – no API key configured")
+                return
+
             self._update_job(job_id, compiled=compiled, phase="done", done=True)
             self.logs.info("llm", "Compile completed", compiled[:1200])
             with self._lock:
                 self.latest_status = "已复制" if self.service.settings.auto_copy else "整理完成"
         except Exception as exc:
             message = str(exc)
-            self._update_job(job_id, phase="error", done=True, error=message)
+            # Translate common LLM errors into error codes the frontend can localize.
+            error_code = message
+            lower = message.lower()
+            if "not configured" in lower or "api key" in lower:
+                error_code = "llm.notConfigured"
+            elif "401" in lower or "unauthorized" in lower or "invalid api key" in lower:
+                error_code = "llm.invalidKey"
+            elif "timeout" in lower or "timed out" in lower:
+                error_code = "llm.timeout"
+            elif "connection" in lower or "refused" in lower or "resolve" in lower:
+                error_code = "llm.connectionError"
+            self._update_job(job_id, phase="error", done=True, error=error_code)
             self.logs.error("job", message)
             self.set_status(message)
         finally:
@@ -812,6 +897,7 @@ def build_handler(
                     "/api/record/start": lambda _: app.start_recording(),
                     "/api/record/stop": lambda _: app.stop_recording(),
                     "/api/stt/warmup": lambda _: app.warm_up_stt(),
+                    "/api/llm/test": app.test_llm_connection,
                     "/api/microphone/test": app.test_microphone,
                     "/api/transcribe/test": lambda _: app.transcribe_test_audio(),
                     "/api/history/delete": app.delete_history,

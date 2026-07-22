@@ -185,13 +185,11 @@ UI には現在 2 Provider があり、任意のモデルファイルを自動�
 
 ## 📈 Star の推移
 
-> 📊 Star History は公開 GitHub リポジトリが必要です。現在設定されているリポジトリ URL は公開アクセスできないため、外部チャートは HTTP 500 を返します。公開後、`<OWNER>/<REPO>` を実際の公開リポジトリ名に置き換えてください。
-
-```md
-[![Star History Chart](https://api.star-history.com/svg?repos=<OWNER>/<REPO>&type=Date)](https://star-history.com/#<OWNER>/<REPO>&Date)
-```
+[![Star History Chart](https://api.star-history.com/svg?repos=kgnbkgnb666/Aura&type=Date)](https://star-history.com/#kgnbkgnb666/Aura&Date)
 
 ## 🛠️ 開発
+
+> Windows で更新をインストールする前に Aura を終了してください。インストーラーも `aura.exe` と `aura-sidecar.exe` を自動終了し、使用中のファイルを解放します。
 
 ### バージョン管理
 
@@ -217,5 +215,13 @@ npm run build:sidecar
 ### 🌟 曖昧な考えを、実行できる次の一歩へ
 
 Aura が役に立ったら、⭐ Star をお願いします。ありがとうございます！❤️
+
+---
+
+### 💬 Aura 技術交流グループ（QQ）
+
+QQ 技術交流グループへようこそ。礼儀正しい議論で共に成長しましょう！
+
+![QQ 技術交流グループ](qq技术交流群.jpg)
 
 </div>

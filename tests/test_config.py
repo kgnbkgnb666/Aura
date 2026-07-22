@@ -23,7 +23,7 @@ def test_new_local_config_defaults_to_standard_and_ignores_provider_api_key_env(
     assert store.path.exists()
 
 
-def test_frozen_app_uses_local_appdata_instead_of_install_directory(tmp_path, monkeypatch):
+def test_frozen_app_stores_data_in_install_directory(tmp_path, monkeypatch):
     install_dir = tmp_path / "Program Files" / "Aura"
     local_appdata = tmp_path / "LocalAppData"
     install_dir.mkdir(parents=True)
@@ -34,10 +34,32 @@ def test_frozen_app_uses_local_appdata_instead_of_install_directory(tmp_path, mo
     store = SettingsStore()
     settings = store.load()
 
-    assert store.root_dir == local_appdata / "Aura"
-    assert store.path == local_appdata / "Aura" / "config.local.json"
-    assert settings.history_path == local_appdata / "Aura" / ".aura-local" / "history.sqlite"
-    assert not (install_dir / "config.local.json").exists()
+    # Data is stored next to the executable, not in AppData
+    assert store.root_dir == install_dir
+    assert store.path == install_dir / "config.local.json"
+    assert settings.history_path == install_dir / ".aura-local" / "history.sqlite"
+    assert (install_dir / "config.local.json").exists()
+
+
+def test_frozen_app_does_not_import_legacy_appdata_credentials_or_history(tmp_path, monkeypatch):
+    local_appdata = tmp_path / "LocalAppData"
+    legacy_appdata = tmp_path / "RoamingAppData"
+    legacy_dir = legacy_appdata / "Aura"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "history.sqlite").write_bytes(b"legacy-history")
+    (legacy_dir / "config.json").write_text(
+        json.dumps({"llm_api_key": "legacy-secret", "history_path": str(legacy_dir / "history.sqlite")}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(config_module.sys, "executable", str(tmp_path / "Aura" / "aura-sidecar.exe"))
+    monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
+    monkeypatch.setenv("APPDATA", str(legacy_appdata))
+
+    settings = SettingsStore().load()
+
+    assert settings.deepseek_api_key == ""
+    assert not settings.history_path.exists()
 
 
 def test_legacy_aura_api_key_environment_variable_is_ignored(tmp_path, monkeypatch):

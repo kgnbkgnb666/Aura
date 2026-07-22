@@ -1,6 +1,6 @@
 [package]
 name = "aura"
-version = "0.1.3"
+version = "0.1.4"
 description = "Aura Tauri desktop shell"
 authors = ["Aura"]
 edition = "2021"

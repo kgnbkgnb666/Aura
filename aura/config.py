@@ -36,13 +36,10 @@ def legacy_app_data_dir(app_name: str = "Aura") -> Path:
 
 def project_root() -> Path:
     if getattr(sys, "frozen", False):
-        # Packaged applications must never write user data beside the executable.
-        # Keeping it under LocalAppData also prevents development secrets/history
-        # from being mistaken for installer payload or surviving in $INSTDIR.
-        root = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-        if root:
-            return Path(root) / "Aura"
-        return Path.home() / ".aura"
+        # Packaged: store all data (config, models, history, API keys)
+        # next to the executable so everything lives inside the install
+        # directory — easy to manage, back up, or migrate.
+        return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
 
@@ -85,6 +82,11 @@ class SettingsStore:
     def _migrate_legacy_data(self) -> None:
         """Copy old AppData settings/history once without deleting the originals."""
         if self.path.exists():
+            return
+        if getattr(sys, "frozen", False):
+            # A clean packaged install must never import credentials, history, or
+            # settings from an older AppData-based installation. Besides being a
+            # privacy surprise, it makes a new install appear preconfigured.
             return
         legacy_config = self.legacy_dir / "config.json"
         if not legacy_config.exists():

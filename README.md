@@ -202,13 +202,11 @@ Editable source: [docs/assets/aura-architecture.drawio](docs/assets/aura-archite
 
 ## 📈 Star history
 
-> 📊 Star History requires a public GitHub repository. The currently configured repository URL is not publicly accessible, so the third-party chart returns HTTP 500 instead of an image. After publishing, replace `<OWNER>/<REPO>` below with the public repository slug.
-
-```md
-[![Star History Chart](https://api.star-history.com/svg?repos=<OWNER>/<REPO>&type=Date)](https://star-history.com/#<OWNER>/<REPO>&Date)
-```
+[![Star History Chart](https://api.star-history.com/svg?repos=kgnbkgnb666/Aura&type=Date)](https://star-history.com/#kgnbkgnb666/Aura&Date)
 
 ## 🛠️ Development
+
+> On Windows, close Aura before installing an update. The installer also closes `aura.exe` and `aura-sidecar.exe` automatically to release locked files.
 
 ### Versioning
 
@@ -236,5 +234,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute modes, STT providers, LLM c
 If Aura helps you, please give it a ⭐ Star. Thank you! ❤️
 
 [Report an issue](https://github.com/kgnbkgnb666/Aura/issues) · [Contribute](CONTRIBUTING.md) · [MIT License](LICENSE)
+
+---
+
+### 💬 Aura 技术交流群
+
+欢迎加入 QQ 技术交流群，文明讨论，共同进步！
+
+![QQ 技术交流群](qq技术交流群.jpg)
 
 </div>

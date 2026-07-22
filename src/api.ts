@@ -249,6 +249,11 @@ export const api = {
     }),
   warmupStt: () =>
     request<{ state: AppState }>("/api/stt/warmup", { method: "POST", body: "{}" }),
+  testLlm: () =>
+    request<{ ok: boolean; error?: string; model?: string; provider?: string }>("/api/llm/test", {
+      method: "POST",
+      body: "{}"
+    }),
   compile: (transcript: string) =>
     request<{ transcript: string; compiled: string; state: AppState }>("/api/compile", {
       method: "POST",
