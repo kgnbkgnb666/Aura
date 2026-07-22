@@ -241,6 +241,6 @@ If Aura helps you, please give it a ⭐ Star. Thank you! ❤️
 
 欢迎加入 QQ 技术交流群，文明讨论，共同进步！
 
-![QQ 技术交流群](qq技术交流群.jpg)
+<img src="qq技术交流群.jpg" alt="QQ 技术交流群" width="360" />
 
 </div>
