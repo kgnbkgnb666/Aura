@@ -4,5 +4,5 @@ requests>=2.31
 PyYAML>=6.0
 funasr>=1.2
 modelscope>=1.17
-torch>=2.3
+torch>=2.13.0
 faster-whisper>=1.1
