@@ -83,7 +83,7 @@ def test_sensevoice_small_defaults_to_gguf_runtime(tmp_path):
     )
     service = AuraService(settings=settings, modes=ModeRegistry().load())
 
-    assert isinstance(service.transcriber, SenseVoiceGgufTranscriber)
+    assert isinstance(service.transcriber, SenseVoiceSmallTranscriber)
 
 
 def test_legacy_funasr_provider_remains_available(tmp_path):
