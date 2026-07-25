@@ -20,14 +20,14 @@
     "@tauri-apps/plugin-opener": "^2.5.4",
     "i18next": "^26.3.6",
     "lucide-react": "^0.468.0",
-    "react": "^18.3.1",
+    "react": "^19.2.8",
     "react-dom": "^18.3.1",
     "react-i18next": "^17.0.10"
   },
   "devDependencies": {
     "@rolldown/plugin-babel": "^0.2.3",
     "@tauri-apps/cli": "^2.5.0",
-    "@types/react": "^18.3.12",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.3",
     "babel-plugin-react-compiler": "^1.0.0",
