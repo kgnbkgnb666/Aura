@@ -88,6 +88,7 @@ export type AppState = {
     turn_count: number;
     merge_output: boolean;
   };
+  current_clarity: { score: number; level: string; label: string } | null;
   history: Array<{
     id: string;
     title: string;
@@ -200,7 +201,7 @@ export const api = {
       body: JSON.stringify({ mode_id: modeId })
     }),
   loadSession: (sessionId: string) =>
-    request<{ session: AppState["current_session"]; transcript: string; compiled: string; state: AppState }>(
+    request<{ session: AppState["current_session"]; transcript: string; compiled: string; clarity: { score: number; level: string; label: string } | null; state: AppState }>(
       "/api/session/load",
       {
         method: "POST",
@@ -270,7 +271,7 @@ export const api = {
       body: JSON.stringify({ transcript })
     }),
   generateQuestions: (transcript: string) =>
-    request<{ questions: Array<{ id: string; question: string; options: string[] }> }>("/api/clarity/questions", {
+    request<{ questions: Array<{ id: string; question: string; options: string[]; multi_select: boolean }> }>("/api/clarity/questions", {
       method: "POST",
       body: JSON.stringify({ transcript })
     }),

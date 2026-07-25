@@ -24,7 +24,7 @@ const zhCN = {
   shortcuts: { focus: "唤起并聚焦 Aura", record: "Aura 主界面聚焦时按住录音，松开后转录", newSession: "新建会话", hide: "隐藏 Aura" },
   logs: { empty: "暂无日志" },
   history: { clear: "清空历史", empty: "暂无历史", deleteTitle: "删除这条历史记录", confirmDelete: "删除这条历史记录？此操作无法撤销。" },
-  clarity: { supplementary: "补充信息", supplementaryTitle: "补充信息", customAnswer: "自定义回答...", noQuestions: "AI 暂未生成补充问题，请确认转录内容是否清晰。", high: "清晰", medium: "一般", low: "模糊" }
+  clarity: { supplementary: "补充信息", supplementaryTitle: "补充信息", customAnswer: "自定义回答...", noQuestions: "AI 暂未生成补充问题，请确认转录内容是否清晰。", high: "清晰", medium: "一般", low: "模糊", label: "问题清晰度：", multiSelect: "可多选", refreshQuestions: "刷新问题", refreshing: "刷新中..." }
 };
 
 const zhTW = {
@@ -41,7 +41,7 @@ const zhTW = {
   shortcuts: { focus: "喚起並聚焦 Aura", record: "Aura 主介面聚焦時按住錄音，放開後轉錄", newSession: "新增工作階段", hide: "隱藏 Aura" },
   logs: { empty: "暫無日誌" },
   history: { clear: "清除歷史", empty: "暫無歷史", deleteTitle: "刪除此筆歷史", confirmDelete: "刪除此筆歷史記錄？此操作無法復原。" },
-  clarity: { supplementary: "補充資訊", supplementaryTitle: "補充資訊", customAnswer: "自訂回答...", noQuestions: "AI 暫未生成補充問題，請確認轉錄內容是否清晰。", high: "清晰", medium: "一般", low: "模糊" }
+  clarity: { supplementary: "補充資訊", supplementaryTitle: "補充資訊", customAnswer: "自訂回答...", noQuestions: "AI 暫未生成補充問題，請確認轉錄內容是否清晰。", high: "清晰", medium: "一般", low: "模糊", label: "問題清晰度：", multiSelect: "可多選", refreshQuestions: "重新產生問題", refreshing: "產生中..." }
 };
 
 const en = {
@@ -58,7 +58,7 @@ const en = {
   shortcuts: { focus: "Show and focus Aura", record: "Hold to record while Aura is focused; release to transcribe", newSession: "New session", hide: "Hide Aura" },
   logs: { empty: "No logs" },
   history: { clear: "Clear history", empty: "No history", deleteTitle: "Delete this history item", confirmDelete: "Delete this history item? This cannot be undone." },
-  clarity: { supplementary: "Add Details", supplementaryTitle: "Add Supplementary Info", customAnswer: "Custom answer...", noQuestions: "No supplementary questions generated. Verify the transcript is clear.", high: "Clear", medium: "Fair", low: "Vague" }
+  clarity: { supplementary: "Add Details", supplementaryTitle: "Add Supplementary Info", customAnswer: "Custom answer...", noQuestions: "No supplementary questions generated. Verify the transcript is clear.", high: "Clear", medium: "Fair", low: "Vague", label: "Clarity: ", multiSelect: "Multi-select", refreshQuestions: "Refresh questions", refreshing: "Refreshing..." }
 };
 
 const ja = {
@@ -75,7 +75,7 @@ const ja = {
   shortcuts: { focus: "Aura を表示してフォーカス", record: "Aura にフォーカス中、押し続けて録音し、離すと文字起こし", newSession: "新しいセッション", hide: "Aura を隠す" },
   logs: { empty: "ログはありません" },
   history: { clear: "履歴をクリア", empty: "履歴はありません", deleteTitle: "この履歴を削除", confirmDelete: "この履歴を削除しますか？元に戻せません。" },
-  clarity: { supplementary: "情報を補足", supplementaryTitle: "補足情報", customAnswer: "カスタム回答...", noQuestions: "AI が補足質問を生成しませんでした。文字起こしが明確か確認してください。", high: "明確", medium: "普通", low: "曖昧" }
+  clarity: { supplementary: "情報を補足", supplementaryTitle: "補足情報", customAnswer: "カスタム回答...", noQuestions: "AI が補足質問を生成しませんでした。文字起こしが明確か確認してください。", high: "明確", medium: "普通", low: "曖昧", label: "明確度：", multiSelect: "複数選択可", refreshQuestions: "質問を更新", refreshing: "更新中..." }
 };
 
 Object.assign(zhCN, { runtime: { ready: "准备就绪", recording: "正在录音", recordingLevel: "录音中 {{volume}}", transcribing: "正在转录", organizing: "正在整理", copied: "已复制", organized: "整理完成", newSession: "新会话", mergeOn: "合并需求输出已开启", mergeOff: "仅输出本次需求", settingsSaved: "设置已保存", speechSaved: "语音设置已保存", llmSaved: "LLM 设置已保存", skillsSaved: "Skill 配置已保存", preloading: "正在预加载转录模型", micTesting: "正在测试麦克风", micDone: "麦克风测试完成", testTranscribing: "正在转录测试音频", testDone: "测试转录完成", recompiled: "重新编译完成", historyCleared: "历史已清空", historyDeleted: "历史记录已删除", extracted: "已提取 {{count}} 个 Skill", mode: "模式: {{name}}", defaultMode: "默认模式: {{name}}", historyLoaded: "已切换历史: {{name}}", sensevoiceReady: "SenseVoice-Small 模型已就绪", sensevoiceUsing: "正在使用 SenseVoice-Small 识别语音", whisperUsing: "正在使用 Whisper Large V3 识别语音", cudaFallback: "CUDA 运行库不完整，已自动切换到 CPU 模式", whisperFallback: "Whisper 下载失败，已自动切换回 SenseVoice Small" } });

@@ -26,27 +26,40 @@ function isNewerVersion(candidate: string, current: string): boolean {
 }
 
 export async function checkGitHubUpdate(currentVersion: string): Promise<UpdateCheckResult> {
-  const response = await fetch(LATEST_RELEASE_URL, {
-    headers: { Accept: "application/vnd.github+json" }
-  });
-  if (response.status === 404) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(LATEST_RELEASE_URL, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Aura-Desktop-App",
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (response.status === 404) {
+      return {
+        currentVersion,
+        latestVersion: currentVersion,
+        releaseUrl: `${AURA_GITHUB_URL}/releases`,
+        hasUpdate: false,
+        published: false,
+      };
+    }
+    if (!response.ok) throw new Error(`GitHub update check failed: ${response.status}`);
+    const release = (await response.json()) as { tag_name?: string; html_url?: string };
+    const latestVersion = String(release.tag_name || "").replace(/^v/i, "");
+    if (!latestVersion) throw new Error("GitHub release does not include a version tag");
     return {
       currentVersion,
-      latestVersion: currentVersion,
-      releaseUrl: `${AURA_GITHUB_URL}/releases`,
-      hasUpdate: false,
-      published: false
+      latestVersion,
+      releaseUrl: release.html_url || `${AURA_GITHUB_URL}/releases/latest`,
+      hasUpdate: isNewerVersion(latestVersion, currentVersion),
+      published: true,
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (!response.ok) throw new Error(`GitHub update check failed: ${response.status}`);
-  const release = await response.json() as { tag_name?: string; html_url?: string };
-  const latestVersion = String(release.tag_name || "").replace(/^v/i, "");
-  if (!latestVersion) throw new Error("GitHub release does not include a version tag");
-  return {
-    currentVersion,
-    latestVersion,
-    releaseUrl: release.html_url || `${AURA_GITHUB_URL}/releases/latest`,
-    hasUpdate: isNewerVersion(latestVersion, currentVersion),
-    published: true
-  };
 }

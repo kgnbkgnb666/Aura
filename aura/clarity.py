@@ -44,12 +44,14 @@ Rules:
 - Each question should target one missing piece: goal, context, constraints, expected output, scope, environment, or priority.
 - Each question MUST have 2–4 concrete, distinct answer options the user can select from. Make options realistic and helpful.
 - Consider previous conversation context so you don't ask about already-covered topics.
+- For each question, decide whether it should allow single selection or multi-select. Use multi-select when multiple answers can complement each other (e.g., "which environments are affected?"), and single-select when answers are mutually exclusive (e.g., "is this a new feature or a bug fix?").
 - Questions should be in the user's language.
 
 Return ONLY a JSON array (no markdown, no explanation) of objects with exactly these keys:
 - "id": a short kebab-case identifier (e.g. "target-env")
 - "question": the question text
-- "options": array of 2–4 answer choice strings\
+- "options": array of 2–4 answer choice strings
+- "multi_select": boolean, true if the question allows selecting multiple options\
 """
 
 
@@ -118,5 +120,6 @@ def parse_supplement_response(raw: str) -> list[dict[str, object]]:
             "id": qid,
             "question": question,
             "options": [str(o) for o in options],
+            "multi_select": bool(item.get("multi_select", False)),
         })
     return result

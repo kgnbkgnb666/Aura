@@ -23,6 +23,7 @@ import {
   HelpCircle,
   History,
   Keyboard,
+  Lightbulb,
   ListChecks,
   Mic,
   Moon,
@@ -267,21 +268,21 @@ function ClarityDonut({ score, level, label }: {
   label: string;
 }) {
   const color = level === "high" ? "#28a765" : level === "medium" ? "#d4a017" : "#d14343";
-  const r = 18;
+  const r = 15;
   const circumference = 2 * Math.PI * r;
   const dashOffset = circumference * (1 - score / 100);
 
   return (
     <div className="clarity-donut" title={`${label}: ${score}%`}>
-      <svg width="28" height="28" viewBox="0 0 40 40">
-        <circle cx="20" cy="20" r={r} fill="none" stroke="var(--clarity-track)" strokeWidth="3" />
+      <svg width="34" height="34" viewBox="0 0 40 40">
+        <circle cx="20" cy="20" r={r} fill="none" stroke="var(--clarity-track)" strokeWidth="5" />
         <circle
-          cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="3"
+          cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="5"
           strokeDasharray={circumference} strokeDashoffset={dashOffset}
           strokeLinecap="round" transform="rotate(-90 20 20)"
           style={{ transition: "stroke-dashoffset 0.5s ease, stroke 0.3s ease" }}
         />
-        <text x="20" y="21" textAnchor="middle" fontSize="10" fontWeight="600" fill="currentColor">
+        <text x="20" y="25" textAnchor="middle" fontSize="15" fontWeight="700" fill="currentColor">
           {score}
         </text>
       </svg>
@@ -297,6 +298,8 @@ export default function App() {
   const [transcript, setTranscript] = useState("");
   const [compiled, setCompiled] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedFading, setCopiedFading] = useState(false);
+  const copiedTimeoutRef = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Settings>(emptySettings);
@@ -319,9 +322,10 @@ export default function App() {
   const [compiledEditing, setCompiledEditing] = useState(false);
   const [clarity, setClarity] = useState<{ score: number; level: string; label: string } | null>(null);
   const [clarityLoading, setClarityLoading] = useState(false);
-  const [questions, setQuestions] = useState<Array<{ id: string; question: string; options: string[]; selectedAnswer?: string }>>([]);
+  const [questions, setQuestions] = useState<Array<{ id: string; question: string; options: string[]; multi_select: boolean; selectedAnswers: string[] }>>([]);
   const [questionsLoading, setQuestionsLoading] = useState(false);
   const [showQuestionsModal, setShowQuestionsModal] = useState(false);
+  const questionsCacheRef = useRef<{ transcript: string; questions: Array<{ id: string; question: string; options: string[]; multi_select: boolean; selectedAnswers: string[] }> } | null>(null);
   const recordingRef = useRef(false);
   const transcriptEditedByUser = useRef(false);
   const historySelectRef = useRef<HTMLSelectElement>(null);
@@ -425,6 +429,11 @@ export default function App() {
           setTranscript(restored?.transcript || "");
           setCompiled(restored?.compiled || "");
           setCopied(false);
+          if (restored?.clarity) {
+            setClarity(restored.clarity);
+          } else if (restored?.transcript?.trim()) {
+            assessClarity(restored.transcript);
+          }
         }
         const devicePayload = await api.devices().catch(() => ({ devices: [] }));
         if (!cancelled) setDevices(devicePayload.devices);
@@ -624,14 +633,30 @@ export default function App() {
 
   useEffect(() => {
     if (!copied) return;
-    const id = window.setTimeout(() => {
+    setCopiedFading(false);
+    // Clear any existing timeout
+    if (copiedTimeoutRef.current !== null) window.clearTimeout(copiedTimeoutRef.current);
+    // Show "Copied" for 900ms, then start fading
+    copiedTimeoutRef.current = window.setTimeout(() => {
+      setCopiedFading(true);
+    }, 900) as unknown as number;
+    // Fully remove after fade completes
+    const fadeId = window.setTimeout(() => {
       setCopied(false);
+      setCopiedFading(false);
+      copiedTimeoutRef.current = null;
       setState((current) => {
         if (!current || current.runtime.status !== t("common.copied")) return current;
         return { ...current, runtime: { ...current.runtime, status: t("main.organized") } };
       });
-    }, 1500);
-    return () => window.clearTimeout(id);
+    }, 1600);
+    return () => {
+      window.clearTimeout(fadeId);
+      if (copiedTimeoutRef.current !== null) {
+        window.clearTimeout(copiedTimeoutRef.current);
+        copiedTimeoutRef.current = null;
+      }
+    };
   }, [copied]);
 
   const keyboardContextRef = useRef({
@@ -729,8 +754,16 @@ export default function App() {
     setActiveJobId("");
     setTranscriptEditing(false);
     setCompiledEditing(false);
-    setClarity(null);
     setQuestions([]);
+    questionsCacheRef.current = null;
+    // Use persisted clarity if available; only re-assess if missing and transcript exists
+    if (payload.clarity) {
+      setClarity(payload.clarity);
+    } else if (payload.transcript.trim()) {
+      assessClarity(payload.transcript);
+    } else {
+      setClarity(null);
+    }
   }
 
   async function shiftMode(delta: number) {
@@ -752,12 +785,15 @@ export default function App() {
     setCompiledEditing(false);
     setClarity(null);
     setQuestions([]);
+    questionsCacheRef.current = null;
   }
 
   async function copyCompiled() {
     if (!compiled.trim()) return;
     await navigator.clipboard.writeText(compiled);
-    setCopied(true);
+    // Force refresh even if already "copied" state (e.g. after auto-copy)
+    setCopied(false);
+    requestAnimationFrame(() => setCopied(true));
   }
 
   async function assessClarity(text: string) {
@@ -774,12 +810,20 @@ export default function App() {
     }
   }
 
-  async function loadQuestions() {
+  async function loadQuestions(forceRefresh = false) {
     if (!transcript.trim()) return;
+    const cacheKey = transcript.trim();
+    // Reuse cached questions for same transcript unless forced refresh
+    if (!forceRefresh && questionsCacheRef.current?.transcript === cacheKey) {
+      setQuestions(structuredClone(questionsCacheRef.current.questions));
+      return;
+    }
     setQuestionsLoading(true);
     try {
       const result = await api.generateQuestions(transcript);
-      setQuestions(result.questions.map(q => ({ ...q, selectedAnswer: undefined })));
+      const fresh = result.questions.map(q => ({ ...q, selectedAnswers: [] }));
+      questionsCacheRef.current = { transcript: cacheKey, questions: structuredClone(fresh) };
+      setQuestions(fresh);
     } catch {
       setQuestions([]);
     } finally {
@@ -787,15 +831,19 @@ export default function App() {
     }
   }
 
+  async function refreshQuestions() {
+    await loadQuestions(true);
+  }
+
   async function handleConfirmQuestions() {
-    const answeredQuestions = questions.filter(q => q.selectedAnswer);
+    const answeredQuestions = questions.filter(q => q.selectedAnswers.length > 0);
     if (answeredQuestions.length === 0) {
       setShowQuestionsModal(false);
       return;
     }
 
     const supplementText = answeredQuestions
-      .map(q => `${q.question}\n答：${q.selectedAnswer}`)
+      .map(q => `${q.question}\n答：${q.selectedAnswers.join("；")}`)
       .join("\n\n");
 
     const enhancedTranscript = transcript + "\n\n[补充信息]\n" + supplementText;
@@ -1224,7 +1272,12 @@ export default function App() {
             <div className="pane-head">
               <span className="pane-title"><Mic size={14} />{t("main.rawTranscript")}</span>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                {clarity ? <ClarityDonut score={clarity.score} level={clarity.level} label={clarity.label} /> : null}
+                {clarity ? (
+                  <>
+                    <span className="clarity-label">{t("clarity.label")}</span>
+                    <ClarityDonut score={clarity.score} level={clarity.level} label={clarity.label} />
+                  </>
+                ) : null}
                 {state.runtime.recording ? <Mic size={16} /> : null}
                 <button
                   title={transcriptEditing ? t("main.finishEdit") : t("main.editTranscript")}
@@ -1256,7 +1309,7 @@ export default function App() {
 	                    setShowQuestionsModal(true);
 	                  }}
 	                >
-	                  <HelpCircle size={14} />
+	                  <Lightbulb size={14} />
 	                  <span>{t("clarity.supplementary")}</span>
 	                </button>
 	                <button
@@ -1277,7 +1330,7 @@ export default function App() {
                   {compiledEditing ? <Check size={14} /> : <Pencil size={14} />}
                   <span>{compiledEditing ? t("common.done") : t("common.edit")}</span>
                 </button>
-                <button className={copied ? "copy-button copied" : "copy-button"} title={copied ? t("common.copied") : t("common.copy")} onClick={copyCompiled}>
+                <button className={`copy-button ${copied ? `copied${copiedFading ? " copied-fading" : ""}` : ""}`} title={copied ? t("common.copied") : t("common.copy")} onClick={copyCompiled}>
                   {copied ? <Check size={15} /> : <Clipboard size={15} />}
                   <span>{copied ? t("common.copied") : t("common.copy")}</span>
                 </button>
@@ -1306,29 +1359,51 @@ export default function App() {
                 ) : (
                   questions.map((q, i) => (
                     <div key={q.id} className="question-item">
-                      <p className="question-text">{i + 1}. {q.question}</p>
+                      <p className="question-text">
+                        {i + 1}. {q.question}
+                        {q.multi_select ? <span className="multi-select-badge">{t("clarity.multiSelect")}</span> : null}
+                      </p>
                       <div className="question-options">
-                        {q.options.map((opt, j) => (
-                          <button
-                            key={j}
-                            className={`option-chip ${q.selectedAnswer === opt ? "active" : ""}`}
-                            onClick={() => {
-                              setQuestions(prev => prev.map(item =>
-                                item.id === q.id ? { ...item, selectedAnswer: opt } : item
-                              ));
-                            }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
+                        {q.options.map((opt, j) => {
+                          const isSelected = q.selectedAnswers.includes(opt);
+                          return (
+                            <button
+                              key={j}
+                              className={`option-chip ${isSelected ? "active" : ""}`}
+                              onClick={() => {
+                                setQuestions(prev => prev.map(item => {
+                                  if (item.id !== q.id) return item;
+                                  if (item.multi_select) {
+                                    // Toggle: add/remove from selectedAnswers
+                                    const next = isSelected
+                                      ? item.selectedAnswers.filter(a => a !== opt)
+                                      : [...item.selectedAnswers, opt];
+                                    return { ...item, selectedAnswers: next };
+                                  }
+                                  // Single select: replace
+                                  return { ...item, selectedAnswers: isSelected ? [] : [opt] };
+                                }));
+                              }}
+                            >
+                              {isSelected && q.multi_select ? <Check size={11} /> : null}
+                              {opt}
+                            </button>
+                          );
+                        })}
                         <input
                           className="option-input"
                           placeholder={t("clarity.customAnswer")}
-                          value={typeof q.selectedAnswer === "string" && !q.options.includes(q.selectedAnswer) ? q.selectedAnswer : ""}
+                          value={(() => {
+                            const custom = q.selectedAnswers.filter(a => !q.options.includes(a));
+                            return custom.length > 0 ? custom.join("；") : "";
+                          })()}
                           onChange={e => {
-                            setQuestions(prev => prev.map(item =>
-                              item.id === q.id ? { ...item, selectedAnswer: e.target.value } : item
-                            ));
+                            setQuestions(prev => prev.map(item => {
+                              if (item.id !== q.id) return item;
+                              const optionAnswers = item.selectedAnswers.filter(a => item.options.includes(a));
+                              const newCustom = e.target.value ? [e.target.value] : [];
+                              return { ...item, selectedAnswers: [...optionAnswers, ...newCustom] };
+                            }));
                           }}
                           onKeyDown={e => {
                             if (e.code === "Space") e.stopPropagation();
@@ -1340,6 +1415,15 @@ export default function App() {
                 )}
               </div>
               <footer className="modal-footer">
+                <button
+                  className="modal-refresh"
+                  title={t("clarity.refreshQuestions")}
+                  disabled={questionsLoading}
+                  onClick={refreshQuestions}
+                >
+                  {questionsLoading ? <RefreshCcw size={14} className="spinning" /> : <RefreshCcw size={14} />}
+                  <span>{questionsLoading ? t("clarity.refreshing") : t("clarity.refreshQuestions")}</span>
+                </button>
                 <button className="modal-confirm" onClick={handleConfirmQuestions}>
                   <Check size={14} />
                   <span>{t("common.done")}</span>
@@ -1875,9 +1959,15 @@ function GeneralSettings(props: {
     setUpdateFailed(false);
     try {
       setUpdateResult(await checkGitHubUpdate(version));
-    } catch {
+    } catch (exc) {
       setUpdateResult(null);
       setUpdateFailed(true);
+      const message = exc instanceof Error ? exc.message : String(exc);
+      if (message.includes("abort") || message.includes("AbortError") || message.includes("Timeout")) {
+        console.warn("Update check timed out:", message);
+      } else {
+        console.warn("Update check failed:", message);
+      }
     } finally {
       setCheckingUpdate(false);
     }

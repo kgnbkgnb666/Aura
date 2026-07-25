@@ -1,0 +1,324 @@
+<div align="center">
+
+[简体中文](README.md) · [English](README_EN.md) · [日本語](README_ja.md)
+
+# ✨ Aura
+
+### Speak an idea. Turn it into a clear task your AI agent can execute.
+
+🎙️ Local speech-to-text · 🧠 LLM-powered task shaping · 🧩 Skill matching · 📋 Ready to paste into an agent
+
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-22C55E)](LICENSE)
+
+**No prompt templates to memorize. Think out loud; Aura helps you ask clearly.**
+
+If Aura is useful to you, please give the project a ⭐ Star.
+
+</div>
+
+---
+
+## 👀 Aura in 30 seconds
+
+```text
+Rough idea → hold Space and speak → local STT → LLM shapes the request
+          → goals, constraints, and acceptance criteria → paste into your agent
+```
+
+Aura is not another chatbot. It is an expression layer between you and an AI agent: it preserves your intent and turns scattered speech into a clear, actionable, verifiable task.
+
+## 🌌 Why Aura exists
+
+You open Codex, Claude Code, or Cursor. The cursor blinks. You roughly know what you need—fix a bug, change a feature, or capture a half-formed idea—but the goal, scope, steps, and definition of done do not arrive all at once.
+
+That is not a communication failure. **Human thinking naturally moves from vague to clear.** Good ideas become real when we say them, see them, revise them, and add detail. Aura exists to catch that first thought and help illuminate it. ✨
+
+```text
+Vague thought → say it → Aura creates a first clear version → refine it → an agent can execute it
+```
+
+### 🎙️ Why voice?
+
+Typing can make us chase the "perfect sentence" too early. Speaking lets you hesitate, add context, change your mind, and start from a feeling; language models are good at finding intent and structure in those incomplete clues.
+
+| You | Aura | Your agent |
+| --- | --- | --- |
+| 🎤 Speak naturally—no format required | 🧩 Finds goals, context, constraints, and priorities | 🤖 Receives an actionable task |
+| ✍️ Review and revise the first draft | 🧠 Keeps making the request more precise | 🚀 Does the work |
+
+### 🚀 In the agent era, the advantage is asking well
+
+As agents take on repetitive work, the differentiator is increasingly whether we can state the real problem clearly. Aura lets people focus on **goals, judgment, and creativity** instead of learning how to please an input box.
+
+### 🛠️ Wake up dormant Skills
+
+Skills are easy to install and easy to forget. Aura scans their descriptions, matches the current intent, and includes the relevant capability in the generated task.
+
+```text
+"Turn this research into a presentation" → match a presentation Skill → create an agent-ready brief
+```
+
+You do not need to remember every Skill name—remember what you want to accomplish. 🧩
+
+---
+
+## 📅 Changelog
+
+### 2026-07-25
+
+**✨ New: Problem Clarity Score**
+
+- After each voice transcription, AI automatically evaluates clarity and displays a percentage donut chart in the transcript panel (green/yellow/red for high/medium/low clarity)
+- Clarity results are persisted to SQLite — the same transcript always shows the same score, no random variation on reload
+- New "Supplementary Info" feature — AI generates 2–4 clarifying questions with selectable answers based on the current transcript and conversation history; supports single/multi-select (AI decides), plus custom text input
+- Questions are cached by transcript content; reopening shows the same questions unless you click "Refresh questions"
+- Copy button now has a smooth fade-out animation
+
+### 2026-07-22
+
+**🔧 Fixes**
+
+- Packaging bugs fixed
+- New "Test Connection" button in LLM settings to verify API Key
+
+**📝 Docs**
+
+- Added QQ community group to README
+
+### 2026-07-21
+
+**🔧 Fixes**
+
+- STT model fallback: Whisper download failure auto-switches to SenseVoice Small with persistent config
+- Multiple packaging fixes
+
+**📝 Docs**
+
+- README restructured for clarity
+
+### 2026-07-20
+
+**✨ New**
+
+- Three official modes (Action / Decision / Creative), with custom modes and private copies
+- Theme toggle (Morning / Night), supports zh-CN / zh-TW / en / ja
+- Easier STT model switching
+- Fixed LLM API Key persistence
+
+### 2026-07-18 ~ 07-19
+
+**✨ New**
+
+- Settings page: STT model selection (SenseVoice Small / Whisper Large V3)
+- UI theme improvements
+- Windows installer (NSIS)
+- System tray, auto-launch
+- Exit and logging improvements
+- Pre-release builds
+
+### 2026-07-16 ~ 07-17
+
+**✨ New**
+
+- Cold start optimization: model loading progress bar on boot screen
+- Edit mode: manually edit transcript and compiled result, recompile after changes
+- Local Skill scanning and matching
+- Session history: load, delete, clear
+
+### 2026-07-10 ~ 07-12
+
+**🎉 Project born**
+
+- MVP 1.0: voice input → local STT → LLM compilation → copy result
+- Skill configuration page
+- Initial support for editing transcript and compiled results
+- First framework
+
+---
+
+## 🌟 What it does
+
+- 🎙️ Hold `Space` to record; release to transcribe and organize.
+- 🔒 Run speech recognition locally with SenseVoice Small or Whisper Large V3.
+- 🧠 Use the default DeepSeek setup or any OpenAI-compatible LLM endpoint.
+- 🎯 Choose Action, Decision, or Creative mode for task-specific prompting.
+- 🧩 Scan and match local Skills.
+- 📊 **Clarity Score**: AI evaluates how clear each request is, shown as a donut chart.
+- 💡 **Supplementary Info**: AI generates clarifying questions with multiple-choice answers to help users add missing details.
+- 🔁 Keep conversational context and optionally merge requirements across turns.
+- 📋 Copy the finished brief into Codex, Claude Code, Cursor, or another agent.
+
+## 🚀 Quick start
+
+### Requirements
+
+- Windows 10 / 11
+- Python 3.10 or 3.11
+- Node.js 20.19+
+- Rust stable
+- Visual Studio C++ Build Tools
+
+```powershell
+git clone https://github.com/kgnbkgnb666/Aura.git
+cd Aura
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+npm ci
+npm run tauri:dev
+```
+
+On first launch Aura prepares the selected local speech model. Then hold `Space` and say your first idea. 🚀
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl + Shift + Space` | Bring Aura to the front |
+| Hold `Space` | Record; release to process |
+| `Ctrl + N` | New session |
+| `Esc` | Hide Aura |
+
+## 🧠 Why DeepSeek is the default recommendation
+
+Aura mainly needs to understand spoken language, extract goals and constraints, and reshape text. It does not require an expensive frontier model for every request. For this workload, DeepSeek is more than capable:
+
+- 💰 **Affordable** for frequent everyday use.
+- 🧱 **Reliable** OpenAI-compatible API and streaming workflow.
+- ⚡ **Fast enough** for the responsiveness expected from voice-to-task.
+- 🛠️ **Simple**: enter a DeepSeek API key in `Settings → LLM`.
+
+The default is `deepseek-v4-flash` with thinking disabled. For harder work, choose `deepseek-v4-pro` or enable thinking mode. Available model names depend on your DeepSeek account and API.
+
+> 🔐 In a development checkout, keys are stored in the project's `config.local.json`. In the packaged Windows app, they are stored at `%LOCALAPPDATA%\Aura\config.local.json`—never in the installer payload. Both are plaintext; never upload or share them.
+
+### 🔌 Use a custom LLM endpoint
+
+Open `Settings → LLM → Custom endpoint`, then provide an OpenAI-compatible Base URL, the actual model ID, and an API key when required. Local services may leave the key blank.
+
+| Service | Endpoint example | Model example |
+| --- | --- | --- |
+| Ollama | `http://127.0.0.1:11434/v1` | `qwen3:8b` |
+| vLLM | `http://127.0.0.1:8000/v1` | Your served model ID |
+| Gateway | `https://your-gateway.example/v1` | A gateway-supported model ID |
+
+Any OpenAI Chat Completions-compatible hosted, self-hosted, or local service can be used. Without an available LLM, Aura falls back to a local rule-based organizer.
+
+## 🎧 STT models: choose, download, extend
+
+| Model | Strength | Trade-off | Best for |
+| --- | --- | --- | --- |
+| **SenseVoice Small** | ⚡ Lightweight, quick, strong Chinese support | Lower ceiling for multilingual/noisy audio | Everyday Chinese voice input |
+| **Whisper Large V3** | 🎯 Higher accuracy and multilingual support | About 3 GB; slower on CPU | Multilingual or accuracy-first work |
+
+Select a model in `Settings → Speech`. Use **Preload model** to download and initialize it ahead of time; the model-cache root is configurable on the same page.
+
+- SenseVoice downloads through ModelScope into `models/modelscope/`.
+- Whisper downloads into `models/huggingface/`.
+- Whisper uses an NVIDIA GPU with a complete CUDA 12 / cuDNN 9 setup, otherwise CPU `int8`.
+- If Whisper cannot download because of a network error, Aura falls back to SenseVoice Small.
+
+### Download models in advance
+
+```powershell
+# SenseVoice Small + VAD
+$env:MODELSCOPE_CACHE = "$PWD\models\modelscope"
+modelscope download --model iic/SenseVoiceSmall
+modelscope download --model iic/speech_fsmn_vad_zh-cn-16k-common-pytorch
+
+# Whisper Large V3, faster-whisper conversion
+hf download Systran/faster-whisper-large-v3 --cache-dir models/huggingface
+```
+
+Install the CLIs if needed:
+
+```powershell
+python -m pip install -U modelscope huggingface_hub
+```
+
+### Add your own STT provider
+
+The UI currently ships with two providers; it does **not** import arbitrary model files automatically. To add a provider:
+
+1. Add a provider under `aura/providers/stt/` with `name`, `load_model()`, `transcribe()`, `status`, `progress`, `last_error`, and `is_ready`.
+2. Export it from `aura/providers/stt/__init__.py`.
+3. Register its ID in `SUPPORTED_STT_PROVIDERS` in `aura/config.py`.
+4. Map the ID in `AuraService._build_transcriber()`.
+5. Add its selector option and copy in `src/App.tsx` and `src/i18n.ts`.
+
+See `SenseVoiceSmallTranscriber` and `WhisperLargeV3Transcriber` as references.
+
+## 🎯 Modes: choose and customize
+
+| Mode | Choose it when | Output emphasizes |
+| --- | --- | --- |
+| ⚡ **Action** | You know what to do: code, docs, debugging, data | Scope, constraints, deliverables, acceptance criteria |
+| 🧭 **Decision** | You need to choose: trade-offs, priorities, direction | Facts vs. assumptions, options, risks, recommendation |
+| 🎨 **Creative** | You need to explore: copy, naming, scripts, concepts | Audience, voice, room to create, usable output |
+
+In short: choose **Action** to finish work, **Decision** to choose well, and **Creative** to make something original. 🤝
+
+In `Settings → Modes`, you can enable, disable, reorder, or add modes. Editing an official mode creates a local private copy instead of overwriting its repository definition. Official modes live in `modes/official/*.yaml`; custom modes, private copies, ordering, and enabled state live in `.aura-local/modes/`. Keep at least one mode enabled.
+
+## 🏗️ Architecture
+
+![Aura technical architecture](docs/assets/aura-architecture.svg)
+
+Editable source: [docs/assets/aura-architecture.drawio](docs/assets/aura-architecture.drawio)
+
+| Layer | Technology / responsibility |
+| --- | --- |
+| Desktop UI | Tauri 2 + React 18 + TypeScript for recording, settings, and result editing |
+| Local service | Python sidecar + local HTTP API orchestrating recording, STT, sessions, and streaming |
+| Speech | PyAudio, FunASR / SenseVoice, faster-whisper / CTranslate2 |
+| Compiler | Modes, session context, and Skills sent to DeepSeek or a custom LLM |
+| Local data | Development: project root. Packaged Windows app: `%LOCALAPPDATA%\Aura` for config, SQLite history, private modes, and model cache |
+
+## 📈 Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=kgnbkgnb666/Aura&type=Date)](https://star-history.com/#kgnbkgnb666/Aura&Date)
+
+## 🛠️ Development
+
+> On Windows, close Aura before installing an update. The installer also closes `aura.exe` and `aura-sidecar.exe` automatically to release locked files.
+
+### Versioning
+
+`package.json` is the single version source. Update all package metadata with one command:
+
+```powershell
+npm run release:version -- 0.1.3
+```
+
+This synchronizes `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. `npm run tauri:build` also synchronizes Tauri and Cargo automatically before packaging.
+
+```powershell
+npm run build
+python -m pytest
+npm run tauri:dev
+npm run build:sidecar
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute modes, STT providers, LLM compatibility, Skills, or product improvements.
+
+<div align="center">
+
+### 🌟 Turn every vague thought into an executable next step
+
+If Aura helps you, please give it a ⭐ Star. Thank you! ❤️
+
+[Report an issue](https://github.com/kgnbkgnb666/Aura/issues) · [Contribute](CONTRIBUTING.md) · [MIT License](LICENSE)
+
+---
+
+### 💬 Aura 技术交流群
+
+欢迎加入 QQ 技术交流群，文明讨论，共同进步！
+
+<img src="qq技术交流群.jpg" alt="QQ 技术交流群" width="360" />
+
+</div>

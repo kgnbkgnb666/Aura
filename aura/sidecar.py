@@ -194,10 +194,18 @@ def session_payload(session: Session) -> JsonDict:
 
 def session_detail_payload(session: Session) -> JsonDict:
     latest_turn = session.turns[-1] if session.turns else None
+    clarity = None
+    if latest_turn and latest_turn.clarity_score is not None:
+        clarity = {
+            "score": latest_turn.clarity_score,
+            "level": latest_turn.clarity_level or "medium",
+            "label": latest_turn.clarity_label or "",
+        }
     return {
         "session": session_payload(session),
         "transcript": latest_turn.raw_transcript if latest_turn else "",
         "compiled": latest_turn.compiled_text if latest_turn else "",
+        "clarity": clarity,
     }
 
 
@@ -256,6 +264,7 @@ class AuraSidecar:
                 "skills": [skill_payload(skill) for skill in self.service.settings.skills],
                 "current_mode": current_mode,
                 "current_session": session_payload(self.service.current_session),
+                "current_clarity": self.service.current_session.latest_clarity,
                 "history": self.service.history.recent_sessions(),
                 "service": {
                     "stt_provider": self.service.settings.stt_provider,
@@ -787,7 +796,7 @@ class AuraSidecar:
         self.logs.info("clarity", f"Generated {len(questions)} supplementary questions")
         return {
             "questions": [
-                {"id": q.id, "question": q.question, "options": q.options}
+                {"id": q.id, "question": q.question, "options": q.options, "multi_select": q.multi_select}
                 for q in questions
             ]
         }

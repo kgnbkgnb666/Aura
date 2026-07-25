@@ -54,10 +54,19 @@ class HistoryStore:
                     mode_id text,
                     stt_provider text,
                     llm_provider text,
-                    created_at text
+                    created_at text,
+                    clarity_score integer,
+                    clarity_level text,
+                    clarity_label text
                 )
                 """
             )
+            # Migration: add clarity columns if they don't exist
+            columns = {row[1] for row in conn.execute("pragma table_info(turns)")}
+            if "clarity_score" not in columns:
+                conn.execute("alter table turns add column clarity_score integer")
+                conn.execute("alter table turns add column clarity_level text")
+                conn.execute("alter table turns add column clarity_label text")
 
     def save_session(self, session: Session) -> None:
         with self._connect() as conn:
@@ -91,15 +100,19 @@ class HistoryStore:
                 """
                 insert into turns(
                     id, session_id, turn_index, raw_transcript, compiled_text,
-                    mode_id, stt_provider, llm_provider, created_at
+                    mode_id, stt_provider, llm_provider, created_at,
+                    clarity_score, clarity_level, clarity_label
                 )
-                values(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     raw_transcript=excluded.raw_transcript,
                     compiled_text=excluded.compiled_text,
                     mode_id=excluded.mode_id,
                     stt_provider=excluded.stt_provider,
-                    llm_provider=excluded.llm_provider
+                    llm_provider=excluded.llm_provider,
+                    clarity_score=excluded.clarity_score,
+                    clarity_level=excluded.clarity_level,
+                    clarity_label=excluded.clarity_label
                 """,
                 (
                     turn.id,
@@ -111,6 +124,9 @@ class HistoryStore:
                     turn.stt_provider,
                     turn.llm_provider,
                     _dt(turn.created_at),
+                    turn.clarity_score,
+                    turn.clarity_level,
+                    turn.clarity_label,
                 ),
             )
             if owns_connection:
@@ -181,7 +197,8 @@ class HistoryStore:
             turns = conn.execute(
                 """
                 select id, session_id, turn_index, raw_transcript, compiled_text,
-                    mode_id, stt_provider, llm_provider, created_at
+                    mode_id, stt_provider, llm_provider, created_at,
+                    clarity_score, clarity_level, clarity_label
                 from turns
                 where session_id = ?
                 order by turn_index asc
@@ -208,6 +225,9 @@ class HistoryStore:
                 stt_provider=turn[6],
                 llm_provider=turn[7],
                 created_at=_parse_dt(turn[8]),
+                clarity_score=turn[9],
+                clarity_level=turn[10],
+                clarity_label=turn[11],
             )
             for turn in turns
         ]

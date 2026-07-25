@@ -80,6 +80,9 @@ class Turn:
     stt_provider: str
     llm_provider: str
     created_at: datetime = field(default_factory=utc_now)
+    clarity_score: int | None = None
+    clarity_level: str | None = None
+    clarity_label: str | None = None
 
 
 @dataclass(slots=True)
@@ -108,6 +111,9 @@ class Session:
         compiled_text: str,
         stt_provider: str,
         llm_provider: str,
+        clarity_score: int | None = None,
+        clarity_level: str | None = None,
+        clarity_label: str | None = None,
     ) -> Turn:
         turn = Turn(
             id=new_id(),
@@ -118,6 +124,9 @@ class Session:
             mode_id=self.mode_id,
             stt_provider=stt_provider,
             llm_provider=llm_provider,
+            clarity_score=clarity_score,
+            clarity_level=clarity_level,
+            clarity_label=clarity_label,
         )
         self.turns.append(turn)
         self.updated_at = turn.created_at
@@ -134,6 +143,20 @@ class Session:
         turn.compiled_text = compiled_text
         self.updated_at = utc_now()
         return turn
+
+    @property
+    def latest_clarity(self) -> dict[str, object] | None:
+        """Return the clarity data of the latest turn, if set."""
+        if not self.turns:
+            return None
+        turn = self.turns[-1]
+        if turn.clarity_score is None:
+            return None
+        return {
+            "score": turn.clarity_score,
+            "level": turn.clarity_level or "medium",
+            "label": turn.clarity_label or "",
+        }
 
 
 @dataclass(slots=True)
@@ -245,6 +268,7 @@ class SupplementaryQuestion:
     id: str
     question: str
     options: list[str]
+    multi_select: bool = False
 
 
 @dataclass(slots=True)

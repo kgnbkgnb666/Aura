@@ -308,6 +308,11 @@ class AuraService:
                 stt_provider=self.settings.stt_provider,
                 llm_provider=self.compiler.llm.name,
             )
+        else:
+            # Transcript changed — clear stale clarity so it gets re-assessed
+            turn.clarity_score = None
+            turn.clarity_level = None
+            turn.clarity_label = None
         if self.settings.save_history:
             self.history.save_session(self.current_session)
         return compiled
@@ -326,11 +331,20 @@ class AuraService:
         messages = build_clarity_messages(transcript, self.settings.ui_language)
         response = self.compiler.llm.chat(messages)
         parsed = parse_clarity_response(response, self.settings.ui_language)
-        return ClarityAssessment(
+        assessment = ClarityAssessment(
             score=int(parsed["score"]),
             level=str(parsed["level"]),
             label=str(parsed["label"]),
         )
+        # Persist clarity on the latest turn
+        if self.current_session.turns:
+            turn = self.current_session.turns[-1]
+            turn.clarity_score = assessment.score
+            turn.clarity_level = assessment.level
+            turn.clarity_label = assessment.label
+            if self.settings.save_history:
+                self.history.save_session(self.current_session)
+        return assessment
 
     def generate_supplementary_questions(self, transcript: str) -> list[SupplementaryQuestion]:
         history = [t.raw_transcript for t in self.current_session.turns]
