@@ -23,7 +23,8 @@ const zhCN = {
   llm: { source: "大模型来源", custom: "自定义接口", endpoint: "API 端点", modelName: "模型名称", modelPlaceholder: "服务提供的模型 ID", customKey: "自定义接口 API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "输入自定义接口 API Key；本地服务可留空", deepseekKeyPlaceholder: "输入 DeepSeek API Key", keySaved: "密钥保存在 config.local.json；清空并保存可删除。", keyUnsaved: "保存后将写入本机 config.local.json，请勿手动分享。", thinking: "思考模式", thinkingNote: "默认关闭；开启后会提高复杂任务质量，但响应更慢。", customNote: "支持 OpenAI-compatible 接口，包括用户自建服务、Ollama、vLLM 或第三方网关。", save: "保存 LLM", testConnection: "测试连接", testing: "正在测试…", testSuccess: "连接成功 — 模型 {{model}} 响应正常", testFailed: "测试失败，请检查配置", notConfigured: "LLM 未配置 API Key。请在设置 → LLM 中填写 DeepSeek API Key 或配置自定义接口。", invalidKey: "API Key 无效，请检查后在设置 → LLM 中重新填写。", timeoutError: "LLM 请求超时，请检查网络连接或增加超时时间后重试。", connectionError: "无法连接 LLM 服务，请检查 API 端点和网络连接。" },
   shortcuts: { focus: "唤起并聚焦 Aura", record: "Aura 主界面聚焦时按住录音，松开后转录", newSession: "新建会话", hide: "隐藏 Aura" },
   logs: { empty: "暂无日志" },
-  history: { clear: "清空历史", empty: "暂无历史", deleteTitle: "删除这条历史记录", confirmDelete: "删除这条历史记录？此操作无法撤销。" }
+  history: { clear: "清空历史", empty: "暂无历史", deleteTitle: "删除这条历史记录", confirmDelete: "删除这条历史记录？此操作无法撤销。" },
+  clarity: { supplementary: "补充信息", supplementaryTitle: "补充信息", customAnswer: "自定义回答...", noQuestions: "AI 暂未生成补充问题，请确认转录内容是否清晰。", high: "清晰", medium: "一般", low: "模糊" }
 };
 
 const zhTW = {
@@ -39,7 +40,8 @@ const zhTW = {
   llm: { source: "大型語言模型來源", custom: "自訂介面", endpoint: "API 端點", modelName: "模型名稱", modelPlaceholder: "服務提供的模型 ID", customKey: "自訂介面 API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "輸入自訂介面 API Key；本機服務可留空", deepseekKeyPlaceholder: "輸入 DeepSeek API Key", keySaved: "密鑰儲存在 config.local.json；清空並儲存即可刪除。", keyUnsaved: "儲存後將寫入本機 config.local.json，請勿分享。", thinking: "思考模式", thinkingNote: "預設關閉；開啟後可提升複雜任務品質，但回應較慢。", customNote: "支援 OpenAI-compatible 介面，包括自建服務、Ollama、vLLM 或第三方閘道。", save: "儲存 LLM", testConnection: "測試連線", testing: "正在測試…", testSuccess: "連線成功 — 模型 {{model}} 回應正常", testFailed: "測試失敗，請檢查設定", notConfigured: "LLM 未設定 API Key。請在設定 → LLM 中填寫 DeepSeek API Key 或設定自訂介面。", invalidKey: "API Key 無效，請檢查後在設定 → LLM 中重新填寫。", timeoutError: "LLM 請求逾時，請檢查網路連線或增加逾時時間後重試。", connectionError: "無法連線 LLM 服務，請檢查 API 端點和網路連線。" },
   shortcuts: { focus: "喚起並聚焦 Aura", record: "Aura 主介面聚焦時按住錄音，放開後轉錄", newSession: "新增工作階段", hide: "隱藏 Aura" },
   logs: { empty: "暫無日誌" },
-  history: { clear: "清除歷史", empty: "暫無歷史", deleteTitle: "刪除此筆歷史", confirmDelete: "刪除此筆歷史記錄？此操作無法復原。" }
+  history: { clear: "清除歷史", empty: "暫無歷史", deleteTitle: "刪除此筆歷史", confirmDelete: "刪除此筆歷史記錄？此操作無法復原。" },
+  clarity: { supplementary: "補充資訊", supplementaryTitle: "補充資訊", customAnswer: "自訂回答...", noQuestions: "AI 暫未生成補充問題，請確認轉錄內容是否清晰。", high: "清晰", medium: "一般", low: "模糊" }
 };
 
 const en = {
@@ -55,7 +57,8 @@ const en = {
   llm: { source: "Model provider", custom: "Custom endpoint", endpoint: "API endpoint", modelName: "Model name", modelPlaceholder: "Model ID provided by the service", customKey: "Custom endpoint API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "Enter an API Key; leave blank for local services", deepseekKeyPlaceholder: "Enter your DeepSeek API Key", keySaved: "Stored in config.local.json. Clear and save to delete it.", keyUnsaved: "Saving writes the key to local config.local.json. do not share it.", thinking: "Thinking mode", thinkingNote: "Off by default. Improves complex tasks but responds more slowly.", customNote: "Supports OpenAI-compatible services, including self-hosted endpoints, Ollama, vLLM, and gateways.", save: "Save LLM", testConnection: "Test Connection", testing: "Testing…", testSuccess: "Connected — {{model}} responded successfully", testFailed: "Test failed. Check your configuration.", notConfigured: "LLM is not configured. Go to Settings → LLM and add your DeepSeek API Key or configure a custom endpoint.", invalidKey: "Invalid API Key. Check and re-enter it in Settings → LLM.", timeoutError: "LLM request timed out. Check your network connection or increase the timeout and try again.", connectionError: "Cannot connect to the LLM service. Check the API endpoint and your network connection." },
   shortcuts: { focus: "Show and focus Aura", record: "Hold to record while Aura is focused; release to transcribe", newSession: "New session", hide: "Hide Aura" },
   logs: { empty: "No logs" },
-  history: { clear: "Clear history", empty: "No history", deleteTitle: "Delete this history item", confirmDelete: "Delete this history item? This cannot be undone." }
+  history: { clear: "Clear history", empty: "No history", deleteTitle: "Delete this history item", confirmDelete: "Delete this history item? This cannot be undone." },
+  clarity: { supplementary: "Add Details", supplementaryTitle: "Add Supplementary Info", customAnswer: "Custom answer...", noQuestions: "No supplementary questions generated. Verify the transcript is clear.", high: "Clear", medium: "Fair", low: "Vague" }
 };
 
 const ja = {
@@ -71,7 +74,8 @@ const ja = {
   llm: { source: "モデルプロバイダー", custom: "カスタム API", endpoint: "API エンドポイント", modelName: "モデル名", modelPlaceholder: "サービスが提供するモデル ID", customKey: "カスタム API Key", deepseekKey: "DeepSeek API Key", customKeyPlaceholder: "API Key を入力。ローカルサービスは空欄可", deepseekKeyPlaceholder: "DeepSeek API Key を入力", keySaved: "config.local.json に保存されています。空にして保存すると削除できます。", keyUnsaved: "保存するとローカルの config.local.json に書き込まれます。。共有しないでください。", thinking: "思考モード", thinkingNote: "デフォルトはオフです。複雑なタスクの品質が向上しますが、応答は遅くなります。", customNote: "セルフホスト、Ollama、vLLM、各種ゲートウェイなど OpenAI 互換 API に対応します。", save: "LLM を保存", testConnection: "接続テスト", testing: "テスト中…", testSuccess: "接続成功 — {{model}} が正常に応答しました", testFailed: "テスト失敗、設定を確認してください", notConfigured: "LLM が設定されていません。設定 → LLM で DeepSeek API Key を追加するか、カスタム API を設定してください。", invalidKey: "API Key が無効です。設定 → LLM で確認し再入力してください。", timeoutError: "LLM リクエストがタイムアウトしました。ネットワーク接続を確認するか、タイムアウト時間を延長してください。", connectionError: "LLM サービスに接続できません。API エンドポイントとネットワーク接続を確認してください。" },
   shortcuts: { focus: "Aura を表示してフォーカス", record: "Aura にフォーカス中、押し続けて録音し、離すと文字起こし", newSession: "新しいセッション", hide: "Aura を隠す" },
   logs: { empty: "ログはありません" },
-  history: { clear: "履歴をクリア", empty: "履歴はありません", deleteTitle: "この履歴を削除", confirmDelete: "この履歴を削除しますか？元に戻せません。" }
+  history: { clear: "履歴をクリア", empty: "履歴はありません", deleteTitle: "この履歴を削除", confirmDelete: "この履歴を削除しますか？元に戻せません。" },
+  clarity: { supplementary: "情報を補足", supplementaryTitle: "補足情報", customAnswer: "カスタム回答...", noQuestions: "AI が補足質問を生成しませんでした。文字起こしが明確か確認してください。", high: "明確", medium: "普通", low: "曖昧" }
 };
 
 Object.assign(zhCN, { runtime: { ready: "准备就绪", recording: "正在录音", recordingLevel: "录音中 {{volume}}", transcribing: "正在转录", organizing: "正在整理", copied: "已复制", organized: "整理完成", newSession: "新会话", mergeOn: "合并需求输出已开启", mergeOff: "仅输出本次需求", settingsSaved: "设置已保存", speechSaved: "语音设置已保存", llmSaved: "LLM 设置已保存", skillsSaved: "Skill 配置已保存", preloading: "正在预加载转录模型", micTesting: "正在测试麦克风", micDone: "麦克风测试完成", testTranscribing: "正在转录测试音频", testDone: "测试转录完成", recompiled: "重新编译完成", historyCleared: "历史已清空", historyDeleted: "历史记录已删除", extracted: "已提取 {{count}} 个 Skill", mode: "模式: {{name}}", defaultMode: "默认模式: {{name}}", historyLoaded: "已切换历史: {{name}}", sensevoiceReady: "SenseVoice-Small 模型已就绪", sensevoiceUsing: "正在使用 SenseVoice-Small 识别语音", whisperUsing: "正在使用 Whisper Large V3 识别语音", cudaFallback: "CUDA 运行库不完整，已自动切换到 CPU 模式", whisperFallback: "Whisper 下载失败，已自动切换回 SenseVoice Small" } });

@@ -264,6 +264,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ transcript, compiled })
     }),
+  assessClarity: (transcript: string) =>
+    request<{ clarity: { score: number; level: string; label: string } | null }>("/api/clarity/assess", {
+      method: "POST",
+      body: JSON.stringify({ transcript })
+    }),
+  generateQuestions: (transcript: string) =>
+    request<{ questions: Array<{ id: string; question: string; options: string[] }> }>("/api/clarity/questions", {
+      method: "POST",
+      body: JSON.stringify({ transcript })
+    }),
   testMicrophone: () =>
     request<{ recording: RecordingResult; state: AppState }>("/api/microphone/test", {
       method: "POST",

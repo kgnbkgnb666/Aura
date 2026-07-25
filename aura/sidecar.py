@@ -765,6 +765,33 @@ class AuraSidecar:
         self.logs.info("llm", "Recompile completed", compiled[:1200])
         return {"transcript": transcript, "compiled": compiled, "state": self.state()}
 
+    def assess_clarity(self, payload: JsonDict) -> JsonDict:
+        transcript = str(payload.get("transcript") or "").strip()
+        if not transcript:
+            return {"clarity": None}
+        assessment = self.service.assess_clarity(transcript)
+        self.logs.info("clarity", f"Clarity assessed: {assessment.score} ({assessment.level})")
+        return {
+            "clarity": {
+                "score": assessment.score,
+                "level": assessment.level,
+                "label": assessment.label,
+            }
+        }
+
+    def generate_questions(self, payload: JsonDict) -> JsonDict:
+        transcript = str(payload.get("transcript") or "").strip()
+        if not transcript:
+            return {"questions": []}
+        questions = self.service.generate_supplementary_questions(transcript)
+        self.logs.info("clarity", f"Generated {len(questions)} supplementary questions")
+        return {
+            "questions": [
+                {"id": q.id, "question": q.question, "options": q.options}
+                for q in questions
+            ]
+        }
+
     def clear_history(self) -> JsonDict:
         with self._lock:
             self.service.history.clear()
@@ -894,6 +921,8 @@ def build_handler(
                     "/api/settings/clear_all_data": app.clear_all_data,
                     "/api/compile": app.compile_text,
                     "/api/turn/update": app.update_latest_turn,
+                    "/api/clarity/assess": app.assess_clarity,
+                    "/api/clarity/questions": app.generate_questions,
                     "/api/record/start": lambda _: app.start_recording(),
                     "/api/record/stop": lambda _: app.stop_recording(),
                     "/api/stt/warmup": lambda _: app.warm_up_stt(),

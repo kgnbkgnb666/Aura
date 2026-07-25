@@ -9,11 +9,17 @@ import threading
 from .compiler import PromptCompiler
 from .config import SettingsStore, is_deepseek_endpoint
 from .history import HistoryStore
-from .models import CompileRequest, Mode, Settings, Session
+from .models import ClarityAssessment, CompileRequest, Mode, Settings, Session, SupplementaryQuestion
 from .modes import ModeRegistry
 from .providers.llm import OpenAICompatibleClient, RuleBasedCompiler
 from .providers.stt import SenseVoiceSmallTranscriber, WhisperLargeV3Transcriber
 from .session import SessionManager
+from .clarity import (
+    build_clarity_messages,
+    build_supplement_messages,
+    parse_clarity_response,
+    parse_supplement_response,
+)
 
 
 TextCallback = Callable[[str], None]
@@ -315,3 +321,20 @@ class AuraService:
         transcript = self.transcribe(wav_path, on_status=on_status)
         compiled = self.compile_transcript(transcript, on_chunk=on_chunk)
         return transcript, compiled
+
+    def assess_clarity(self, transcript: str) -> ClarityAssessment:
+        messages = build_clarity_messages(transcript, self.settings.ui_language)
+        response = self.compiler.llm.chat(messages)
+        parsed = parse_clarity_response(response, self.settings.ui_language)
+        return ClarityAssessment(
+            score=int(parsed["score"]),
+            level=str(parsed["level"]),
+            label=str(parsed["label"]),
+        )
+
+    def generate_supplementary_questions(self, transcript: str) -> list[SupplementaryQuestion]:
+        history = [t.raw_transcript for t in self.current_session.turns]
+        messages = build_supplement_messages(transcript, history, self.settings.ui_language)
+        response = self.compiler.llm.chat(messages)
+        parsed = parse_supplement_response(response)
+        return [SupplementaryQuestion(**item) for item in parsed]

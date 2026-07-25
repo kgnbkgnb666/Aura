@@ -20,6 +20,7 @@ import {
   Github,
   GripVertical,
   GitMerge,
+  HelpCircle,
   History,
   Keyboard,
   ListChecks,
@@ -260,6 +261,34 @@ function isDeepSeekEndpoint(value: string) {
   return normalized === "https://api.deepseek.com" || normalized === "https://api.deepseek.com/v1";
 }
 
+function ClarityDonut({ score, level, label }: {
+  score: number;
+  level: string;
+  label: string;
+}) {
+  const color = level === "high" ? "#28a765" : level === "medium" ? "#d4a017" : "#d14343";
+  const r = 18;
+  const circumference = 2 * Math.PI * r;
+  const dashOffset = circumference * (1 - score / 100);
+
+  return (
+    <div className="clarity-donut" title={`${label}: ${score}%`}>
+      <svg width="28" height="28" viewBox="0 0 40 40">
+        <circle cx="20" cy="20" r={r} fill="none" stroke="var(--clarity-track)" strokeWidth="3" />
+        <circle
+          cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="3"
+          strokeDasharray={circumference} strokeDashoffset={dashOffset}
+          strokeLinecap="round" transform="rotate(-90 20 20)"
+          style={{ transition: "stroke-dashoffset 0.5s ease, stroke 0.3s ease" }}
+        />
+        <text x="20" y="21" textAnchor="middle" fontSize="10" fontWeight="600" fill="currentColor">
+          {score}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const [state, setState] = useState<AppState | null>(null);
@@ -288,6 +317,11 @@ export default function App() {
   const [bootElapsedSeconds, setBootElapsedSeconds] = useState(0);
   const [transcriptEditing, setTranscriptEditing] = useState(false);
   const [compiledEditing, setCompiledEditing] = useState(false);
+  const [clarity, setClarity] = useState<{ score: number; level: string; label: string } | null>(null);
+  const [clarityLoading, setClarityLoading] = useState(false);
+  const [questions, setQuestions] = useState<Array<{ id: string; question: string; options: string[]; selectedAnswer?: string }>>([]);
+  const [questionsLoading, setQuestionsLoading] = useState(false);
+  const [showQuestionsModal, setShowQuestionsModal] = useState(false);
   const recordingRef = useRef(false);
   const transcriptEditedByUser = useRef(false);
   const historySelectRef = useRef<HTMLSelectElement>(null);
@@ -567,6 +601,9 @@ export default function App() {
             if (!cancelled) setCopied(true);
             await navigator.clipboard.writeText(payload.job.compiled).catch(() => undefined);
           }
+          if (!payload.job.error && payload.job.transcript) {
+            assessClarity(payload.job.transcript);
+          }
           return;
         }
         window.setTimeout(poll, 180);
@@ -607,7 +644,7 @@ export default function App() {
   });
   keyboardContextRef.current = {
     activeTab,
-    textEditing: transcriptEditing || compiledEditing,
+    textEditing: transcriptEditing || compiledEditing || showQuestionsModal,
     startRecording,
     stopRecording,
     newSession,
@@ -692,6 +729,8 @@ export default function App() {
     setActiveJobId("");
     setTranscriptEditing(false);
     setCompiledEditing(false);
+    setClarity(null);
+    setQuestions([]);
   }
 
   async function shiftMode(delta: number) {
@@ -711,12 +750,75 @@ export default function App() {
     setCopied(false);
     setTranscriptEditing(false);
     setCompiledEditing(false);
+    setClarity(null);
+    setQuestions([]);
   }
 
   async function copyCompiled() {
     if (!compiled.trim()) return;
     await navigator.clipboard.writeText(compiled);
     setCopied(true);
+  }
+
+  async function assessClarity(text: string) {
+    if (!text.trim()) { setClarity(null); return; }
+    setClarityLoading(true);
+    try {
+      const result = await api.assessClarity(text);
+      if (result.clarity) setClarity(result.clarity);
+      else setClarity(null);
+    } catch {
+      setClarity(null);
+    } finally {
+      setClarityLoading(false);
+    }
+  }
+
+  async function loadQuestions() {
+    if (!transcript.trim()) return;
+    setQuestionsLoading(true);
+    try {
+      const result = await api.generateQuestions(transcript);
+      setQuestions(result.questions.map(q => ({ ...q, selectedAnswer: undefined })));
+    } catch {
+      setQuestions([]);
+    } finally {
+      setQuestionsLoading(false);
+    }
+  }
+
+  async function handleConfirmQuestions() {
+    const answeredQuestions = questions.filter(q => q.selectedAnswer);
+    if (answeredQuestions.length === 0) {
+      setShowQuestionsModal(false);
+      return;
+    }
+
+    const supplementText = answeredQuestions
+      .map(q => `${q.question}\n答：${q.selectedAnswer}`)
+      .join("\n\n");
+
+    const enhancedTranscript = transcript + "\n\n[补充信息]\n" + supplementText;
+    setTranscript(enhancedTranscript);
+    transcriptEditedByUser.current = true;
+    setShowQuestionsModal(false);
+    setQuestions([]);
+
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateTurn(enhancedTranscript, compiled);
+      const payload = await api.compile(enhancedTranscript);
+      setCompiled(payload.compiled);
+      setState(payload.state);
+      setTranscriptEditing(false);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setBusy(false);
+    }
+
+    await assessClarity(enhancedTranscript);
   }
 
   async function recompile() {
@@ -735,6 +837,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+    assessClarity(transcript);
   }
 
   async function finishEditing(area: "transcript" | "compiled") {
@@ -1121,6 +1224,7 @@ export default function App() {
             <div className="pane-head">
               <span className="pane-title"><Mic size={14} />{t("main.rawTranscript")}</span>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                {clarity ? <ClarityDonut score={clarity.score} level={clarity.level} label={clarity.label} /> : null}
                 {state.runtime.recording ? <Mic size={16} /> : null}
                 <button
                   title={transcriptEditing ? t("main.finishEdit") : t("main.editTranscript")}
@@ -1144,6 +1248,17 @@ export default function App() {
             <div className="pane-head">
 	              <span className="pane-title"><FileCheck2 size={14} />{t("main.compiled")}</span>
 	              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+	                <button
+	                  title={t("clarity.supplementaryTitle")}
+	                  disabled={busy || !transcript.trim()}
+	                  onClick={() => {
+	                    void loadQuestions();
+	                    setShowQuestionsModal(true);
+	                  }}
+	                >
+	                  <HelpCircle size={14} />
+	                  <span>{t("clarity.supplementary")}</span>
+	                </button>
 	                <button
 	                  className={`merge-output-button ${state.current_session.merge_output ? "active" : ""}`}
 	                  title={state.current_session.merge_output ? t("main.mergeOn") : t("main.mergeOff")}
@@ -1177,6 +1292,62 @@ export default function App() {
             />
           </div>
         </div>
+
+        {showQuestionsModal ? (
+          <div className="modal-overlay" onClick={() => setShowQuestionsModal(false)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()}>
+              <header className="modal-header">
+                <h3>{t("clarity.supplementaryTitle")}</h3>
+                <button className="modal-close" onClick={() => setShowQuestionsModal(false)}>✕</button>
+              </header>
+              <div className="questions-list">
+                {questions.length === 0 ? (
+                  <p className="questions-empty">{questionsLoading ? "..." : t("clarity.noQuestions")}</p>
+                ) : (
+                  questions.map((q, i) => (
+                    <div key={q.id} className="question-item">
+                      <p className="question-text">{i + 1}. {q.question}</p>
+                      <div className="question-options">
+                        {q.options.map((opt, j) => (
+                          <button
+                            key={j}
+                            className={`option-chip ${q.selectedAnswer === opt ? "active" : ""}`}
+                            onClick={() => {
+                              setQuestions(prev => prev.map(item =>
+                                item.id === q.id ? { ...item, selectedAnswer: opt } : item
+                              ));
+                            }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                        <input
+                          className="option-input"
+                          placeholder={t("clarity.customAnswer")}
+                          value={typeof q.selectedAnswer === "string" && !q.options.includes(q.selectedAnswer) ? q.selectedAnswer : ""}
+                          onChange={e => {
+                            setQuestions(prev => prev.map(item =>
+                              item.id === q.id ? { ...item, selectedAnswer: e.target.value } : item
+                            ));
+                          }}
+                          onKeyDown={e => {
+                            if (e.code === "Space") e.stopPropagation();
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <footer className="modal-footer">
+                <button className="modal-confirm" onClick={handleConfirmQuestions}>
+                  <Check size={14} />
+                  <span>{t("common.done")}</span>
+                </button>
+              </footer>
+            </div>
+          </div>
+        ) : null}
 
       </section>
     </main>

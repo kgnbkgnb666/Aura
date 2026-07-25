@@ -234,6 +234,20 @@ class RecordingResult:
 
 
 @dataclass(slots=True)
+class ClarityAssessment:
+    score: int
+    level: str  # "high" | "medium" | "low"
+    label: str  # Human-readable level name in the user's language
+
+
+@dataclass(slots=True)
+class SupplementaryQuestion:
+    id: str
+    question: str
+    options: list[str]
+
+
+@dataclass(slots=True)
 class DeviceInfo:
     index: int
     name: str
