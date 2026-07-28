@@ -12,8 +12,8 @@ import threading
 import time
 import traceback
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -55,14 +55,25 @@ def _log_dir() -> Path:
 def _setup_logging() -> logging.Logger:
     log_dir = _log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
-    today = datetime.now().strftime("%Y-%m-%d")
-    log_file = log_dir / f"aura-sidecar-{today}.log"
+    log_file = log_dir / "aura-sidecar.log"
 
     logger = logging.getLogger("aura")
     logger.setLevel(logging.DEBUG)
 
-    # File handler - always detailed
-    fh = logging.FileHandler(str(log_file), encoding="utf-8")
+    # Reinitialization can happen in tests or embedded launches; never duplicate writes.
+    for handler in list(logger.handlers):
+        if getattr(handler, "_aura_sidecar_file", False):
+            logger.removeHandler(handler)
+            handler.close()
+
+    # File handler - always detailed, bounded to ~40 MB across eight files.
+    fh = RotatingFileHandler(
+        str(log_file),
+        maxBytes=5 * 1024 * 1024,
+        backupCount=7,
+        encoding="utf-8",
+    )
+    fh._aura_sidecar_file = True  # type: ignore[attr-defined]
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -776,7 +787,7 @@ class AuraSidecar:
 
     def assess_clarity(self, payload: JsonDict) -> JsonDict:
         transcript = str(payload.get("transcript") or "").strip()
-        if not transcript:
+        if not transcript or not self.service.supports_structured_analysis:
             return {"clarity": None}
         assessment = self.service.assess_clarity(transcript)
         self.logs.info("clarity", f"Clarity assessed: {assessment.score} ({assessment.level})")
@@ -790,7 +801,7 @@ class AuraSidecar:
 
     def generate_questions(self, payload: JsonDict) -> JsonDict:
         transcript = str(payload.get("transcript") or "").strip()
-        if not transcript:
+        if not transcript or not self.service.supports_structured_analysis:
             return {"questions": []}
         questions = self.service.generate_supplementary_questions(transcript)
         self.logs.info("clarity", f"Generated {len(questions)} supplementary questions")
@@ -996,7 +1007,7 @@ def serve(
 
     try:
         app = AuraSidecar()
-    except Exception as exc:
+    except Exception:
         file_log.critical("Failed to initialize AuraSidecar: %s", traceback.format_exc())
         raise
 

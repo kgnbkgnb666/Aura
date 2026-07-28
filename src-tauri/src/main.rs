@@ -25,13 +25,23 @@ struct SidecarState {
     connection: Mutex<Option<SidecarInfo>>,
 }
 
-impl Drop for SidecarState {
-    fn drop(&mut self) {
+impl SidecarState {
+    fn shutdown(&self) {
         if let Ok(mut child) = self.child.lock() {
             if let Some(mut process) = child.take() {
                 let _ = process.kill();
+                let _ = process.wait();
             }
         }
+        if let Ok(mut connection) = self.connection.lock() {
+            *connection = None;
+        }
+    }
+}
+
+impl Drop for SidecarState {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -52,10 +62,10 @@ struct SidecarHealth {
 fn project_root() -> PathBuf {
     #[cfg(debug_assertions)]
     {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .unwrap_or_else(|| PathBuf::from("."))
     }
 
     #[cfg(not(debug_assertions))]
@@ -230,7 +240,12 @@ fn spawn_sidecar(port: u16, token: &str) -> Result<Child, String> {
                 candidates.push(prefix.join("envs").join("aura").join("python.exe"));
             }
         }
-        candidates.push(project_root().join(".venv").join("Scripts").join("python.exe"));
+        candidates.push(
+            project_root()
+                .join(".venv")
+                .join("Scripts")
+                .join("python.exe"),
+        );
 
         for program in candidates {
             if program.exists() {
@@ -381,13 +396,29 @@ fn toggle_main_window(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::should_hide_main_window;
+    use super::{should_hide_main_window, SidecarInfo, SidecarState};
 
     #[test]
     fn tray_toggle_hides_a_visible_non_minimized_window() {
         assert!(should_hide_main_window(true, false));
         assert!(!should_hide_main_window(false, false));
         assert!(!should_hide_main_window(true, true));
+    }
+
+    #[test]
+    fn sidecar_shutdown_is_idempotent_and_clears_connection() {
+        let state = SidecarState::default();
+        *state.connection.lock().unwrap() = Some(SidecarInfo {
+            port: 8765,
+            base_url: "http://127.0.0.1:8765".to_string(),
+            token: "test-token".to_string(),
+        });
+
+        state.shutdown();
+        state.shutdown();
+
+        assert!(state.child.lock().unwrap().is_none());
+        assert!(state.connection.lock().unwrap().is_none());
     }
 }
 
@@ -488,24 +519,9 @@ fn main() {
                             let _ = toggle_main_window(app);
                         }
                         "quit" => {
-                            // Kill sidecar before exit — app.exit(0) skips Drop, so we must clean up manually
+                            // app.exit(0) skips Drop, so explicitly stop only this app's owned child.
                             if let Some(state) = app.try_state::<SidecarState>() {
-                                if let Ok(mut child) = state.child.lock() {
-                                    if let Some(ref mut process) = *child {
-                                        let _ = process.kill();
-                                        let _ = process.wait();
-                                    }
-                                    *child = None;
-                                }
-                            }
-
-                            // Force kill all sidecar processes by name to prevent leaks
-                            #[cfg(target_os = "windows")]
-                            {
-                                use std::process::Command;
-                                let _ = Command::new("taskkill")
-                                    .args(["/F", "/IM", "aura-sidecar.exe"])
-                                    .output();
+                                state.shutdown();
                             }
 
                             app.exit(0);
@@ -546,13 +562,7 @@ fn main() {
                 WindowEvent::Destroyed => {
                     // Clean up sidecar when window is actually destroyed (app exit)
                     if let Some(app) = window.app_handle().try_state::<SidecarState>() {
-                        if let Ok(mut child) = app.child.lock() {
-                            if let Some(ref mut process) = *child {
-                                let _ = process.kill();
-                                let _ = process.wait();
-                            }
-                            *child = None;
-                        }
+                        app.shutdown();
                     }
                 }
                 _ => {}

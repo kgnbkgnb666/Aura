@@ -4,6 +4,8 @@ import json
 import re
 from typing import Iterable
 
+from ...prompt_loader import load_prompt_config
+
 
 RISK_WORDS = [
     "删除",
@@ -154,6 +156,14 @@ MODE_GUIDANCE = {
     },
 }
 
+_PROMPT_CONFIG = load_prompt_config("rule_based.json")
+_EXTERNAL_TEMPLATES = _PROMPT_CONFIG.get("templates")
+_EXTERNAL_MODE_GUIDANCE = _PROMPT_CONFIG.get("mode_guidance")
+if isinstance(_EXTERNAL_TEMPLATES, dict) and "zh-CN" in _EXTERNAL_TEMPLATES:
+    TEMPLATES = _EXTERNAL_TEMPLATES
+if isinstance(_EXTERNAL_MODE_GUIDANCE, dict):
+    MODE_GUIDANCE = _EXTERNAL_MODE_GUIDANCE
+
 
 def _match_tokens(value: str) -> set[str]:
     tokens = {
@@ -196,6 +206,8 @@ class RuleBasedCompiler:
     """Development fallback used when no LLM key is configured."""
 
     name = "rule_based"
+    is_configured = False
+    supports_structured_output = False
 
     def stream_chat(self, messages: list[dict[str, str]]) -> Iterable[str]:
         text = self.chat(messages)

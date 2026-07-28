@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from .prompt_loader import load_prompt_config
+
 LANGUAGE_LABELS = {
     "zh-CN": {"high": "清晰", "medium": "一般", "low": "模糊"},
     "zh-TW": {"high": "清晰", "medium": "一般", "low": "模糊"},
@@ -53,6 +55,17 @@ Return ONLY a JSON array (no markdown, no explanation) of objects with exactly t
 - "options": array of 2–4 answer choice strings
 - "multi_select": boolean, true if the question allows selecting multiple options\
 """
+
+_PROMPT_CONFIG = load_prompt_config("structured_analysis.json")
+_EXTERNAL_LABELS = _PROMPT_CONFIG.get("language_labels")
+_EXTERNAL_CLARITY_PROMPT = _PROMPT_CONFIG.get("clarity_system_prompt")
+_EXTERNAL_SUPPLEMENT_PROMPT = _PROMPT_CONFIG.get("supplement_system_prompt")
+if isinstance(_EXTERNAL_LABELS, dict) and "zh-CN" in _EXTERNAL_LABELS:
+    LANGUAGE_LABELS = _EXTERNAL_LABELS
+if isinstance(_EXTERNAL_CLARITY_PROMPT, str) and _EXTERNAL_CLARITY_PROMPT.strip():
+    CLARITY_SYSTEM_PROMPT = _EXTERNAL_CLARITY_PROMPT
+if isinstance(_EXTERNAL_SUPPLEMENT_PROMPT, str) and _EXTERNAL_SUPPLEMENT_PROMPT.strip():
+    SUPPLEMENT_SYSTEM_PROMPT = _EXTERNAL_SUPPLEMENT_PROMPT
 
 
 def build_supplement_messages(

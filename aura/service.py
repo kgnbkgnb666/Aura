@@ -12,6 +12,7 @@ from .history import HistoryStore
 from .models import ClarityAssessment, CompileRequest, Mode, Settings, Session, SupplementaryQuestion
 from .modes import ModeRegistry
 from .providers.llm import OpenAICompatibleClient, RuleBasedCompiler
+from .providers.llm.base import UnsupportedLLMCapabilityError
 from .providers.stt import SenseVoiceSmallTranscriber, WhisperLargeV3Transcriber
 from .session import SessionManager
 from .clarity import (
@@ -74,6 +75,7 @@ class AuraService:
         self.transcriber = self._build_transcriber()
         self.compiler = PromptCompiler(self._build_llm())
         self._warmup_lock = threading.Lock()
+        self._llm_lock = threading.RLock()
         self._warmup_thread: threading.Thread | None = None
         self._warmup_generation = 0
         self._settings_store = settings_store
@@ -85,6 +87,20 @@ class AuraService:
     @property
     def current_mode(self) -> Mode:
         return self.modes.get(self.current_session.mode_id)
+
+    @property
+    def supports_structured_analysis(self) -> bool:
+        llm = self.compiler.llm
+        return bool(
+            getattr(llm, "is_configured", False)
+            and getattr(llm, "supports_structured_output", False)
+        )
+
+    def _require_structured_analysis(self) -> None:
+        if not self.supports_structured_analysis:
+            raise UnsupportedLLMCapabilityError(
+                "The configured LLM provider does not support structured analysis."
+            )
 
     def _build_llm(self):
         is_deepseek = self.settings.llm_provider == "deepseek" or is_deepseek_endpoint(
@@ -248,6 +264,19 @@ class AuraService:
     def transcribe(self, wav_path: Path, on_status: TextCallback | None = None) -> str:
         return self.transcriber.transcribe(wav_path, status_callback=on_status)
 
+    def _collect_compilation(
+        self,
+        request: CompileRequest,
+        on_chunk: TextCallback | None,
+    ) -> str:
+        parts: list[str] = []
+        with self._llm_lock:
+            for chunk in self.compiler.stream_compile(request):
+                parts.append(chunk)
+                if on_chunk:
+                    on_chunk(chunk)
+        return "".join(parts).strip()
+
     def compile_transcript(self, transcript: str, on_chunk: TextCallback | None = None) -> str:
         request = CompileRequest(
             mode=self.current_mode,
@@ -258,13 +287,8 @@ class AuraService:
             merge_output=self.current_session.merge_output,
             output_language=self.settings.ui_language,
         )
-        parts: list[str] = []
-        for chunk in self.compiler.stream_compile(request):
-            parts.append(chunk)
-            if on_chunk:
-                on_chunk(chunk)
-        compiled = "".join(parts).strip()
-        turn = self.current_session.add_turn(
+        compiled = self._collect_compilation(request, on_chunk)
+        self.current_session.add_turn(
             raw_transcript=transcript,
             compiled_text=compiled,
             stt_provider=self.settings.stt_provider,
@@ -291,12 +315,7 @@ class AuraService:
             merge_output=self.current_session.merge_output,
             output_language=self.settings.ui_language,
         )
-        parts: list[str] = []
-        for chunk in self.compiler.stream_compile(request):
-            parts.append(chunk)
-            if on_chunk:
-                on_chunk(chunk)
-        compiled = "".join(parts).strip()
+        compiled = self._collect_compilation(request, on_chunk)
         turn = self.current_session.update_latest_turn(
             raw_transcript=transcript,
             compiled_text=compiled,
@@ -328,8 +347,10 @@ class AuraService:
         return transcript, compiled
 
     def assess_clarity(self, transcript: str) -> ClarityAssessment:
+        self._require_structured_analysis()
         messages = build_clarity_messages(transcript, self.settings.ui_language)
-        response = self.compiler.llm.chat(messages)
+        with self._llm_lock:
+            response = self.compiler.llm.chat(messages)
         parsed = parse_clarity_response(response, self.settings.ui_language)
         assessment = ClarityAssessment(
             score=int(parsed["score"]),
@@ -347,8 +368,10 @@ class AuraService:
         return assessment
 
     def generate_supplementary_questions(self, transcript: str) -> list[SupplementaryQuestion]:
+        self._require_structured_analysis()
         history = [t.raw_transcript for t in self.current_session.turns]
         messages = build_supplement_messages(transcript, history, self.settings.ui_language)
-        response = self.compiler.llm.chat(messages)
+        with self._llm_lock:
+            response = self.compiler.llm.chat(messages)
         parsed = parse_supplement_response(response)
         return [SupplementaryQuestion(**item) for item in parsed]

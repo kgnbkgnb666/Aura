@@ -12,6 +12,20 @@ from typing import Callable
 StatusCallback = Callable[[str], None]
 
 
+def _download_cache_state(cache_dir: Path) -> tuple[bool, int]:
+    """Return whether the model is complete and bytes retained in resumable partial files."""
+    complete = any(
+        cache_dir.glob("models--Systran--faster-whisper-large-v3/snapshots/*/model.bin")
+    )
+    partial_bytes = 0
+    for path in cache_dir.rglob("*.incomplete") if cache_dir.exists() else ():
+        try:
+            partial_bytes += path.stat().st_size
+        except OSError:
+            continue
+    return complete, partial_bytes
+
+
 def _cuda_runtime_available() -> bool:
     """Check the CUDA libraries required by CTranslate2 before selecting the GPU."""
     libraries = (
@@ -107,19 +121,25 @@ class WhisperLargeV3Transcriber:
                 has_cuda = ctranslate2.get_cuda_device_count() > 0 and _cuda_runtime_available()
                 device = "cuda" if has_cuda else "cpu"
                 compute_type = "float16" if has_cuda else "int8"
-                cached = any(
-                    self.cache_dir.glob(
-                        "models--Systran--faster-whisper-large-v3/snapshots/*/model.bin"
-                    )
-                )
+                cached, partial_bytes = _download_cache_state(self.cache_dir)
                 self._status = "loading" if cached else "downloading"
-                self._progress = 35 if cached else 15
+                self._progress = 35 if cached else (20 if partial_bytes else 15)
                 if status_callback:
-                    status_callback(
-                        "检测到本地 Whisper Large V3，正在加载"
-                        if cached
-                        else "正在下载 Whisper Large V3（约 3 GB），请保持网络连接"
+                    if cached:
+                        message = "检测到本地 Whisper Large V3，正在加载"
+                    elif partial_bytes:
+                        retained_mb = partial_bytes / (1024 * 1024)
+                        message = f"检测到 {retained_mb:.0f} MB 未完成下载，正在从缓存断点续传"
+                    else:
+                        message = "正在下载 Whisper Large V3（约 3 GB），请保持网络连接"
+                    status_callback(message)
+                if partial_bytes:
+                    logger.info(
+                        "Whisper download resuming from %.1f MB of partial cache",
+                        partial_bytes / (1024 * 1024),
                     )
+                # faster-whisper delegates to huggingface_hub's cache downloader.
+                # Modern huggingface_hub resumes *.incomplete blobs automatically.
                 self._model = WhisperModel(
                     "large-v3",
                     device=device,

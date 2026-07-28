@@ -1,4 +1,5 @@
 numpy>=1.26
 pytest>=8.2
 requests>=2.31
+ruff==0.12.4
 PyYAML>=6.0

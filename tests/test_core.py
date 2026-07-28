@@ -11,7 +11,7 @@ from aura.providers.stt.model_cache import (
     resolve_modelscope_alias,
     resolve_modelscope_model,
 )
-from aura.providers.stt.whisper_large_v3 import _is_cuda_library_error
+from aura.providers.stt.whisper_large_v3 import _download_cache_state, _is_cuda_library_error
 
 
 def test_modes_load():
@@ -31,6 +31,17 @@ def test_whisper_cuda_library_errors_are_detected_for_cpu_fallback():
     assert _is_cuda_library_error(RuntimeError("Library cublas64_12.dll is not found"))
     assert _is_cuda_library_error(RuntimeError("Could not load cudnn_ops64_9.dll"))
     assert not _is_cuda_library_error(RuntimeError("audio file is invalid"))
+
+
+def test_whisper_detects_resumable_partial_download(tmp_path):
+    partial = tmp_path / "models--Systran--faster-whisper-large-v3" / "blobs" / "model.incomplete"
+    partial.parent.mkdir(parents=True)
+    partial.write_bytes(b"partial-model")
+
+    complete, partial_bytes = _download_cache_state(tmp_path)
+
+    assert complete is False
+    assert partial_bytes == len(b"partial-model")
 
 
 def test_builtin_action_mode_has_delivery_contract():

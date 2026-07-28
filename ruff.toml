@@ -1,0 +1,10 @@
+target-version = "py311"
+line-length = 100
+exclude = [
+  ".tmp",
+  "build",
+  "dist",
+  "models",
+  "node_modules",
+  "src-tauri",
+]

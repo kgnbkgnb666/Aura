@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { OperationTimeoutError, retryWithBackoff, withTimeout } from "./workflows/async";
 
 export type Mode = {
   id: string;
@@ -146,10 +147,20 @@ export type LogEntry = {
 
 let baseUrl = "http://127.0.0.1:8765";
 let authToken = "";
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const LONG_REQUEST_TIMEOUT_MS = 120_000;
+
+type RequestOptions = RequestInit & { timeoutMs?: number; retryAttempts?: number };
+
+class RetryableHttpError extends Error {}
 
 export async function ensureSidecar(): Promise<void> {
   try {
-    const info = await invoke<{ port: number; base_url: string; token: string }>("ensure_sidecar");
+    const info = await withTimeout(
+      () => invoke<{ port: number; base_url: string; token: string }>("ensure_sidecar"),
+      30_000,
+      "sidecar startup",
+    );
     baseUrl = info.base_url || `http://127.0.0.1:${info.port}`;
     authToken = info.token;
   } catch {
@@ -170,42 +181,83 @@ export function setTrayLanguage(language: Settings["ui_language"]): Promise<void
   return invoke<void>("set_tray_language", { language });
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Aura-Token": authToken,
-      ...(init?.headers || {})
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const {
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    retryAttempts,
+    signal: parentSignal,
+    ...init
+  } = options;
+  const method = (init.method || "GET").toUpperCase();
+  const maxAttempts = retryAttempts ?? (method === "GET" ? 3 : 1);
+  const { response, responseText } = await retryWithBackoff(
+    () => withTimeout(
+      async (signal) => {
+        const response = await fetch(`${baseUrl}${path}`, {
+          ...init,
+          signal,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Aura-Token": authToken,
+            ...(init.headers || {})
+          }
+        });
+        const responseText = await response.text();
+        if ([502, 503, 504].includes(response.status)) {
+          throw new RetryableHttpError(`Sidecar temporarily unavailable: ${response.status}`);
+        }
+        return { response, responseText };
+      },
+      timeoutMs,
+      `${method} ${path}`,
+      parentSignal || undefined,
+    ),
+    {
+      maxAttempts,
+      signal: parentSignal || undefined,
+      shouldRetry: (error) =>
+        error instanceof RetryableHttpError ||
+        error instanceof OperationTimeoutError ||
+        error instanceof TypeError,
+    },
+  );
+  let payload: Record<string, unknown> = {};
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Invalid JSON response from ${path} (${response.status})`);
     }
-  });
-  const payload = await response.json();
+  }
   if (!response.ok) {
-    throw new Error(payload.error || `Request failed: ${response.status}`);
+    throw new Error(String(payload.error || `Request failed: ${response.status}`));
   }
   return payload as T;
 }
 
 export const api = {
-  state: () => request<AppState>("/api/state"),
-  devices: () => request<{ devices: DeviceInfo[] }>("/api/devices"),
-  status: () => request<RuntimeState>("/api/status"),
+  state: (signal?: AbortSignal) => request<AppState>("/api/state", { signal }),
+  devices: (signal?: AbortSignal) => request<{ devices: DeviceInfo[] }>("/api/devices", { signal }),
+  status: (signal?: AbortSignal, retryAttempts = 3) =>
+    request<RuntimeState>("/api/status", { signal, retryAttempts }),
   startRecording: () =>
     request<{ state: AppState }>("/api/record/start", { method: "POST", body: "{}" }),
   stopRecording: () =>
     request<RecordStopResponse>("/api/record/stop", { method: "POST", body: "{}" }),
-  job: (jobId: string) => request<{ job: ProcessingJob; state: AppState }>(`/api/jobs/${jobId}`),
-  newSession: (modeId: string) =>
+  job: (jobId: string, signal?: AbortSignal) => request<{ job: ProcessingJob; state: AppState }>(`/api/jobs/${jobId}`, { signal, retryAttempts: 1 }),
+  newSession: (modeId: string, signal?: AbortSignal) =>
     request<{ state: AppState }>("/api/session/new", {
       method: "POST",
-      body: JSON.stringify({ mode_id: modeId })
+      body: JSON.stringify({ mode_id: modeId }),
+      signal,
     }),
-  loadSession: (sessionId: string) =>
+  loadSession: (sessionId: string, signal?: AbortSignal) =>
     request<{ session: AppState["current_session"]; transcript: string; compiled: string; clarity: { score: number; level: string; label: string } | null; state: AppState }>(
       "/api/session/load",
       {
         method: "POST",
-        body: JSON.stringify({ session_id: sessionId })
+        body: JSON.stringify({ session_id: sessionId }),
+        signal,
       }
     ),
   setMergeOutput: (mergeOutput: boolean) =>
@@ -248,32 +300,40 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
-  warmupStt: () =>
-    request<{ state: AppState }>("/api/stt/warmup", { method: "POST", body: "{}" }),
+  warmupStt: (signal?: AbortSignal) =>
+    request<{ state: AppState }>("/api/stt/warmup", { method: "POST", body: "{}", signal }),
   testLlm: () =>
     request<{ ok: boolean; error?: string; model?: string; provider?: string }>("/api/llm/test", {
       method: "POST",
-      body: "{}"
+      body: "{}",
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     }),
-  compile: (transcript: string) =>
+  compile: (transcript: string, signal?: AbortSignal) =>
     request<{ transcript: string; compiled: string; state: AppState }>("/api/compile", {
       method: "POST",
-      body: JSON.stringify({ transcript })
+      body: JSON.stringify({ transcript }),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+      signal,
     }),
-  updateTurn: (transcript: string, compiled: string) =>
+  updateTurn: (transcript: string, compiled: string, signal?: AbortSignal) =>
     request<{ state: AppState }>("/api/turn/update", {
       method: "POST",
-      body: JSON.stringify({ transcript, compiled })
+      body: JSON.stringify({ transcript, compiled }),
+      signal,
     }),
-  assessClarity: (transcript: string) =>
+  assessClarity: (transcript: string, signal?: AbortSignal) =>
     request<{ clarity: { score: number; level: string; label: string } | null }>("/api/clarity/assess", {
       method: "POST",
-      body: JSON.stringify({ transcript })
+      body: JSON.stringify({ transcript }),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+      signal,
     }),
-  generateQuestions: (transcript: string) =>
+  generateQuestions: (transcript: string, signal?: AbortSignal) =>
     request<{ questions: Array<{ id: string; question: string; options: string[]; multi_select: boolean }> }>("/api/clarity/questions", {
       method: "POST",
-      body: JSON.stringify({ transcript })
+      body: JSON.stringify({ transcript }),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+      signal,
     }),
   testMicrophone: () =>
     request<{ recording: RecordingResult; state: AppState }>("/api/microphone/test", {
@@ -292,7 +352,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId })
     }),
-  logs: () => request<{ logs: LogEntry[]; state: AppState }>("/api/logs"),
+  logs: (signal?: AbortSignal) => request<{ logs: LogEntry[]; state: AppState }>("/api/logs", { signal }),
   clearLogs: () =>
     request<{ logs: LogEntry[]; state: AppState }>("/api/logs/clear", {
       method: "POST",

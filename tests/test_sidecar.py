@@ -5,13 +5,17 @@ from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import pytest
+
 from aura.config import SettingsStore
 from aura.models import RecordingResult
 from aura.providers.llm import OpenAICompatibleClient
+from aura.providers.llm.base import UnsupportedLLMCapabilityError
 from aura.sidecar import (
     API_KEY_MASK,
     MAX_REQUEST_BODY_BYTES,
     AuraSidecar,
+    _setup_logging,
     _process_is_alive,
     build_handler,
     json_response,
@@ -29,6 +33,32 @@ def local_app(tmp_path):
 def test_parent_process_liveness_detection():
     assert _process_is_alive(os.getpid()) is True
     assert _process_is_alive(0) is False
+
+
+def test_sidecar_logging_is_rotating_persistent_and_not_duplicated(tmp_path, monkeypatch):
+    monkeypatch.setattr("aura.sidecar._log_dir", lambda: tmp_path)
+    logger = _setup_logging()
+    logger = _setup_logging()
+    handlers = [
+        handler for handler in logger.handlers
+        if getattr(handler, "_aura_sidecar_file", False)
+    ]
+    assert len(handlers) == 1
+    assert handlers[0].backupCount == 7
+    logger.info("persistent-test-message")
+    handlers[0].flush()
+    assert "persistent-test-message" in (tmp_path / "aura-sidecar.log").read_text("utf-8")
+    logger.removeHandler(handlers[0])
+    handlers[0].close()
+
+
+def test_rule_based_fallback_skips_structured_llm_features(tmp_path):
+    app = local_app(tmp_path)
+    assert app.service.supports_structured_analysis is False
+    assert app.assess_clarity({"transcript": "some request"}) == {"clarity": None}
+    assert app.generate_questions({"transcript": "some request"}) == {"questions": []}
+    with pytest.raises(UnsupportedLLMCapabilityError):
+        app.service.assess_clarity("some request")
 
 
 def test_json_response_serializes_paths_and_dataclasses(tmp_path):

@@ -5,6 +5,8 @@ from typing import Iterable, Protocol
 
 class LLMProvider(Protocol):
     name: str
+    is_configured: bool
+    supports_structured_output: bool
 
     def stream_chat(self, messages: list[dict[str, str]]) -> Iterable[str]:
         raise NotImplementedError
@@ -12,3 +14,6 @@ class LLMProvider(Protocol):
     def chat(self, messages: list[dict[str, str]]) -> str:
         return "".join(self.stream_chat(messages))
 
+
+class UnsupportedLLMCapabilityError(RuntimeError):
+    pass

@@ -43,6 +43,8 @@ import {
 import { AppState, DeviceInfo, LogEntry, Mode, Settings, Skill, api, autostart, ensureSidecar, hideMainWindow, setTrayLanguage } from "./api";
 import { setUiLanguage, storedLanguage, UI_LANGUAGES, UiLanguage } from "./i18n";
 import { AURA_GITHUB_URL, checkGitHubUpdate, UpdateCheckResult } from "./update";
+import { LatestOperation } from "./workflows/async";
+import { monitorRuntimeStatus, pollProcessingJob, SidecarConnectionError, waitForTranscriber } from "./workflows/sidecar";
 
 function DeepSeekLogo(props: SVGProps<SVGSVGElement>) {
   return (
@@ -330,6 +332,9 @@ export default function App() {
   const transcriptEditedByUser = useRef(false);
   const historySelectRef = useRef<HTMLSelectElement>(null);
   const speechSaveVersion = useRef(0);
+  const compileOperation = useRef(new LatestOperation());
+  const clarityOperation = useRef(new LatestOperation());
+  const questionsOperation = useRef(new LatestOperation());
 
   const status = error || localizeRuntimeStatus(state?.runtime.status, t) || t("boot.loading");
   const selectedMode = state?.current_mode;
@@ -344,6 +349,12 @@ export default function App() {
     if (i18n.language !== draft.ui_language) void setUiLanguage(draft.ui_language);
     void setTrayLanguage(draft.ui_language).catch(() => undefined);
   }, [draft.ui_language, i18n.language]);
+
+  useEffect(() => () => {
+    compileOperation.current.cancel();
+    clarityOperation.current.cancel();
+    questionsOperation.current.cancel();
+  }, []);
 
   useEffect(() => {
     if (state || error) return;
@@ -376,14 +387,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     async function boot() {
       try {
         await ensureSidecar();
-        if (cancelled) return;
+        if (signal.aborted) return;
         setBootStatus(i18n.t("boot.startingSpeech"));
         setBootStage("checking");
-        let initial = await api.state();
+        let initial = await api.state(signal);
         setBootProgress(initial.service.transcriber_progress);
         setBootStage(initial.service.transcriber_status);
         setBootStatus(
@@ -392,35 +404,29 @@ export default function App() {
             : i18n.t("boot.checkingSpeech")
         );
         if (!initial.service.transcriber_ready) {
-          let trackedProvider = initial.settings.stt_provider;
-          await api.warmupStt();
-          while (!cancelled) {
-            initial = await api.state();
-            setBootProgress(initial.service.transcriber_progress);
-            setBootStage(initial.service.transcriber_status);
-            setBootStatus(localizeRuntimeStatus(initial.runtime.status, i18n.t.bind(i18n)) || i18n.t("boot.loadingSpeech"));
-            if (initial.service.transcriber_ready) break;
-            // Detect fallback: provider changed → backend switched models automatically.
-            // The status bar will show the fallback message naturally via runtime.status.
-            if (initial.settings.stt_provider !== trackedProvider) {
-              trackedProvider = initial.settings.stt_provider;
-              setBootStatus(localizeRuntimeStatus(initial.runtime.status, i18n.t.bind(i18n)) || i18n.t("boot.loadingSpeech"));
-              continue;
-            }
-            if (initial.service.transcriber_status === "error") {
-              throw new Error(initial.service.transcriber_error || initial.runtime.status || i18n.t("boot.speechFailed"));
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 200));
-          }
+          initial = await waitForTranscriber({
+            initialState: initial,
+            warmup: (requestSignal) => api.warmupStt(requestSignal),
+            getState: (requestSignal) => api.state(requestSignal),
+            onState: (nextState) => {
+              setBootProgress(nextState.service.transcriber_progress);
+              setBootStage(nextState.service.transcriber_status);
+              setBootStatus(
+                localizeRuntimeStatus(nextState.runtime.status, i18n.t.bind(i18n)) ||
+                  i18n.t("boot.loadingSpeech"),
+              );
+            },
+            signal,
+          });
         }
-        if (cancelled) return;
+        if (signal.aborted) return;
         setBootProgress(100);
         setBootStage("ready");
         setBootStatus(i18n.t("boot.speechReady"));
         const latestHistory = initial.history[0];
-        const restored = latestHistory ? await api.loadSession(latestHistory.id) : null;
-        const next = restored?.state || (await api.newSession(initial.current_mode?.id || initial.settings.mode_id)).state;
-        if (!cancelled) {
+        const restored = latestHistory ? await api.loadSession(latestHistory.id, signal) : null;
+        const next = restored?.state || (await api.newSession(initial.current_mode?.id || initial.settings.mode_id, signal)).state;
+        if (!signal.aborted) {
           setState(next);
           setDraft(next.settings);
           setModeDrafts(next.modes);
@@ -435,10 +441,10 @@ export default function App() {
             assessClarity(restored.transcript);
           }
         }
-        const devicePayload = await api.devices().catch(() => ({ devices: [] }));
-        if (!cancelled) setDevices(devicePayload.devices);
-        const logPayload = await api.logs().catch(() => ({ logs: [] }));
-        if (!cancelled) setLogs(logPayload.logs);
+        const devicePayload = await api.devices(signal).catch(() => ({ devices: [] }));
+        if (!signal.aborted) setDevices(devicePayload.devices);
+        const logPayload = await api.logs(signal).catch(() => ({ logs: [] }));
+        if (!signal.aborted) setLogs(logPayload.logs);
 
         // Sync autostart state: ensure OS setting matches user preference
         try {
@@ -452,14 +458,30 @@ export default function App() {
           }
         } catch { /* ignore on unsupported platforms */ }
       } catch (exc) {
-        if (!cancelled) setError(exc instanceof Error ? exc.message : String(exc));
+        if (!signal.aborted) setError(exc instanceof Error ? exc.message : String(exc));
       }
     }
-    boot();
-    return () => {
-      cancelled = true;
-    };
+    void boot();
+    return () => controller.abort();
   }, []);
+
+  async function recoverSidecarAfterFailure(signal?: AbortSignal) {
+    recordingRef.current = false;
+    setBusy(false);
+    setError(t("main.sidecarUnavailable"));
+    try {
+      await ensureSidecar();
+      const recovered = await api.state(signal);
+      if (signal?.aborted) return;
+      setState(recovered);
+      setDraft(recovered.settings);
+      setError(t("main.sidecarRecovered"));
+    } catch {
+      // Keep the actionable unavailable message visible until the user retries.
+    } finally {
+      if (!signal?.aborted) setActiveJobId("");
+    }
+  }
 
   useEffect(() => {
     if (activeTab !== "logs") return;
@@ -479,15 +501,20 @@ export default function App() {
 
   useEffect(() => {
     if (!state?.runtime.recording) return;
-    const id = window.setInterval(async () => {
-      try {
-        const runtime = await api.status();
+    const controller = new AbortController();
+    void monitorRuntimeStatus({
+      getStatus: (signal) => api.status(signal, 1),
+      onUpdate: (runtime) => {
         setState((current) => (current ? { ...current, runtime } : current));
-      } catch {
-        window.clearInterval(id);
+      },
+      signal: controller.signal,
+    }).catch((exc) => {
+      if (controller.signal.aborted) return;
+      if (exc instanceof SidecarConnectionError) {
+        void recoverSidecarAfterFailure(controller.signal);
       }
-    }, 220);
-    return () => window.clearInterval(id);
+    });
+    return () => controller.abort();
   }, [state?.runtime.recording]);
 
   useEffect(() => {
@@ -568,20 +595,21 @@ export default function App() {
       setActiveJobId(payload.job.id);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
-      await refresh().catch(() => undefined);
+      const refreshed = await refresh().then(() => true).catch(() => false);
+      if (!refreshed) await recoverSidecarAfterFailure();
       setBusy(false);
     }
   }, [refresh]);
 
   useEffect(() => {
     if (!activeJobId) return;
-    let cancelled = false;
-    let copiedJob = false;
+    const controller = new AbortController();
 
-    async function poll() {
-      try {
-        const payload = await api.job(activeJobId);
-        if (cancelled) return;
+    void pollProcessingJob({
+      jobId: activeJobId,
+      getJob: (jobId, signal) => api.job(jobId, signal),
+      signal: controller.signal,
+      onUpdate: (payload) => {
         setState(payload.state);
         // Translate known error codes to user-friendly messages.
         const errorCode = payload.job.error;
@@ -602,33 +630,31 @@ export default function App() {
           setTranscript(payload.job.transcript);
         }
         setCompiled(payload.job.compiled);
-        if (payload.job.done) {
-          setBusy(false);
-          setActiveJobId("");
-          if (!payload.job.error && payload.state.settings.auto_copy && payload.job.compiled && !copiedJob) {
-            copiedJob = true;
-            if (!cancelled) setCopied(true);
-            await navigator.clipboard.writeText(payload.job.compiled).catch(() => undefined);
-          }
-          if (!payload.job.error && payload.job.transcript) {
-            assessClarity(payload.job.transcript);
-          }
-          return;
-        }
-        window.setTimeout(poll, 180);
-      } catch (exc) {
-        if (!cancelled) {
-          setBusy(false);
-          setActiveJobId("");
-          setError(exc instanceof Error ? exc.message : String(exc));
-        }
+      },
+    }).then(async (payload) => {
+      if (controller.signal.aborted) return;
+      setBusy(false);
+      setActiveJobId("");
+      if (!payload.job.error && payload.state.settings.auto_copy && payload.job.compiled) {
+        setCopied(true);
+        await navigator.clipboard.writeText(payload.job.compiled).catch(() => undefined);
       }
-    }
+      if (!payload.job.error && payload.job.transcript) {
+        void assessClarity(payload.job.transcript);
+      }
+    }).catch(async (exc) => {
+      if (controller.signal.aborted) return;
+      setBusy(false);
+      recordingRef.current = false;
+      if (!(exc instanceof SidecarConnectionError)) {
+        setActiveJobId("");
+        setError(exc instanceof Error ? exc.message : String(exc));
+        return;
+      }
+      await recoverSidecarAfterFailure(controller.signal);
+    });
 
-    poll();
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [activeJobId]);
 
   useEffect(() => {
@@ -800,12 +826,17 @@ export default function App() {
     if (!text.trim()) { setClarity(null); return; }
     setClarityLoading(true);
     try {
-      const result = await api.assessClarity(text);
+      const outcome = await clarityOperation.current.run(
+        (signal) => api.assessClarity(text, signal),
+        120,
+      );
+      if (outcome.status === "superseded") return;
+      const result = outcome.value;
       if (result.clarity) setClarity(result.clarity);
       else setClarity(null);
+      setClarityLoading(false);
     } catch {
       setClarity(null);
-    } finally {
       setClarityLoading(false);
     }
   }
@@ -820,13 +851,18 @@ export default function App() {
     }
     setQuestionsLoading(true);
     try {
-      const result = await api.generateQuestions(transcript);
+      const outcome = await questionsOperation.current.run(
+        (signal) => api.generateQuestions(transcript, signal),
+        120,
+      );
+      if (outcome.status === "superseded") return;
+      const result = outcome.value;
       const fresh = result.questions.map(q => ({ ...q, selectedAnswers: [] }));
       questionsCacheRef.current = { transcript: cacheKey, questions: structuredClone(fresh) };
       setQuestions(fresh);
+      setQuestionsLoading(false);
     } catch {
       setQuestions([]);
-    } finally {
       setQuestionsLoading(false);
     }
   }
@@ -852,40 +888,37 @@ export default function App() {
     setShowQuestionsModal(false);
     setQuestions([]);
 
-    setBusy(true);
-    setError("");
-    try {
-      await api.updateTurn(enhancedTranscript, compiled);
-      const payload = await api.compile(enhancedTranscript);
-      setCompiled(payload.compiled);
-      setState(payload.state);
-      setTranscriptEditing(false);
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc));
-    } finally {
-      setBusy(false);
-    }
-
-    await assessClarity(enhancedTranscript);
+    const compiledResult = await runLatestCompile(enhancedTranscript, compiled);
+    if (compiledResult) await assessClarity(enhancedTranscript);
   }
 
-  async function recompile() {
-    if (!transcript.trim() || busy) return;
+  async function runLatestCompile(text: string, compiledSnapshot: string) {
     setBusy(true);
     setError("");
     try {
-      await api.updateTurn(transcript, compiled);
-      const payload = await api.compile(transcript);
+      const outcome = await compileOperation.current.run(async (signal) => {
+        await api.updateTurn(text, compiledSnapshot, signal);
+        return api.compile(text, signal);
+      }, 250);
+      if (outcome.status === "superseded") return null;
+      const payload = outcome.value;
       setCompiled(payload.compiled);
       setState(payload.state);
       setTranscriptEditing(false);
       setCompiledEditing(false);
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc));
-    } finally {
       setBusy(false);
+      return payload;
+    } catch (exc) {
+      setBusy(false);
+      setError(exc instanceof Error ? exc.message : String(exc));
+      return null;
     }
-    assessClarity(transcript);
+  }
+
+  async function recompile() {
+    if (!transcript.trim() || busy) return;
+    const compiledResult = await runLatestCompile(transcript, compiled);
+    if (compiledResult) void assessClarity(transcript);
   }
 
   async function finishEditing(area: "transcript" | "compiled") {

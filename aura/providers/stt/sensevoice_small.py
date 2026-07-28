@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import sys
@@ -129,26 +130,18 @@ class SenseVoiceSmallTranscriber:
             # VAD model (fsmn-vad) need so AutoModel can resolve them.
             # ------------------------------------------------------------------
             try:
-                # Tokenizers
-                import funasr.tokenizer.sentencepiece_tokenizer  # SentencepiecesTokenizer
-
-                # Frontends
-                import funasr.frontends.wav_frontend              # WavFrontend
-
-                # Models
-                import funasr.models.sense_voice.model            # SenseVoiceSmall + SenseVoiceEncoderSmall
-                import funasr.models.fsmn_vad_streaming.model     # FsmnVADStreaming
-                import funasr.models.fsmn_vad_streaming.encoder   # FSMN, FSMNExport
-
-                # Specaug (spectrum augmentation - needed by SenseVoiceSmall.__init__)
-                import funasr.models.specaug.specaug              # SpecAug
-
-                # Normalize (normalization modules - needed by SenseVoiceSmall.__init__)
-                import funasr.models.normalize.global_mvn         # GlobalMVN
-                import funasr.models.normalize.utterance_mvn      # UtteranceMVN
-
-                # Encoder (needed by SenseVoiceSmall.__init__)
-                import funasr.models.sense_voice.model            # Contains SenseVoiceEncoderSmall
+                registration_modules = (
+                    "funasr.tokenizer.sentencepiece_tokenizer",
+                    "funasr.frontends.wav_frontend",
+                    "funasr.models.sense_voice.model",
+                    "funasr.models.fsmn_vad_streaming.model",
+                    "funasr.models.fsmn_vad_streaming.encoder",
+                    "funasr.models.specaug.specaug",
+                    "funasr.models.normalize.global_mvn",
+                    "funasr.models.normalize.utterance_mvn",
+                )
+                for module_name in registration_modules:
+                    importlib.import_module(module_name)
 
                 log.info("FunASR registrations imported successfully")
             except ImportError as exc:

@@ -8,6 +8,7 @@ import requests
 
 class OpenAICompatibleClient:
     name = "openai_compatible"
+    supports_structured_output = True
 
     def __init__(
         self,

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
-from pathlib import Path
-
 import aura.providers.stt.sensevoice_gguf as gguf
 from aura.models import Settings
 from aura.modes import ModeRegistry
-from aura.providers.stt import SenseVoiceGgufTranscriber, SenseVoiceSmallTranscriber
+from aura.providers.stt import SenseVoiceSmallTranscriber
 from aura.service import AuraService
 
 

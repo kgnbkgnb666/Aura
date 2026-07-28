@@ -1,3 +1,5 @@
+git init  #初始化git
+
 git status
 git add .
 git commit -m "Prepare Aura for GitHub"
