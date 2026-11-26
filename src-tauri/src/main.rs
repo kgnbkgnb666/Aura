@@ -663,10 +663,16 @@ fn set_tray_language(app: tauri::AppHandle, language: String) -> Result<(), Stri
 }
 
 fn main() {
+    let start_minimized = std::env::args_os().any(|arg| arg == "--minimized");
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| { let _ = show_main_window(app); }))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            if !args.iter().any(|arg| arg == "--minimized") {
+                let _ = show_main_window(app);
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -687,7 +693,7 @@ fn main() {
             insert_text
             ,set_shortcut_capture
         ])
-        .setup(|app| {
+        .setup(move |app| {
             desktop_input::install(app.handle().clone());
 
             let overlay = WebviewWindowBuilder::new(app, "recording-bar", WebviewUrl::App("index.html?view=overlay".into()))
@@ -766,6 +772,9 @@ fn main() {
             #[cfg(windows)]
             if let (Ok(dir), Ok(handle)) = (app.path().app_local_data_dir(), _tray.with_inner_tray_icon(|i| i.window_handle() as usize)) {
                 tray_registration::remember(&dir.join("tray-registration.json"), handle);
+            }
+            if !start_minimized {
+                show_main_window(app.handle()).map_err(std::io::Error::other)?;
             }
             Ok(())
         })

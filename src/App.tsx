@@ -14,6 +14,7 @@ import {
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useTranslation } from "react-i18next";
 import {
   AudioLines,
@@ -51,13 +52,10 @@ import { setUiLanguage, UI_LANGUAGES, type UiLanguage } from "./i18n";
 import "./preferences.css";
 
 const labels = {
-  downloadUpdate: ["下载安装包", "下載安裝程式", "Download update", "更新をダウンロード"],
-  updateHint: [
-    "下载后运行安装包并覆盖安装到原目录。",
-    "下載後執行安裝程式並覆蓋安裝到原目錄。",
-    "Run the downloaded installer and keep the existing install location.",
-    "ダウンロード後、現在のインストール先に上書きインストールしてください。",
-  ],
+  installUpdate: ["更新并重启", "更新並重新啟動", "Update and restart", "更新して再起動"],
+  downloadingUpdate: ["正在下载更新…", "正在下載更新…", "Downloading update…", "更新をダウンロード中…"],
+  installingUpdate: ["正在安装更新…", "正在安裝更新…", "Installing update…", "更新をインストール中…"],
+  updateInstallError: ["安装更新失败，请重试。", "安裝更新失敗，請重試。", "Could not install the update. Try again.", "更新をインストールできませんでした。再試行してください。"],
   inputLevel: ["输入检测", "輸入檢測", "Input check", "入力の確認"],
   skills: ["改写 Skill", "改寫 Skill", "Rewrite skills", "書き換えスキル"],
   skillsHint: [
@@ -255,7 +253,7 @@ export default function App() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [version, setVersion] = useState("");
   const [updateCheck, setUpdateCheck] = useState<{
-    message: string; url?: string; pending?: boolean; failed?: boolean;
+    message: string; update?: Update; pending?: boolean; progress?: number;
   }>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -318,27 +316,38 @@ export default function App() {
   async function checkUpdates() {
     setUpdateCheck({ message: t("general.checking"), pending: true });
     try {
-      const { tag } = await api.latestRelease();
-      if (!tag) {
-        setUpdateCheck({ message: t("general.noRelease") });
-        return;
-      }
-      const parse = (tag: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(tag)?.slice(1).map(Number);
-      const remote = parse(tag);
-      const local = parse(version);
-      if (!remote || !local) throw new Error("Invalid release version");
-      const difference = remote.findIndex((value, index) => value !== local[index]);
-      if (difference === -1 || remote[difference] < local[difference]) {
-        setUpdateCheck({ message: t("general.latest") });
-        return;
-      }
-      const asset = `Aura_${remote.join(".")}_x64-setup.exe`;
-      setUpdateCheck({
-        message: t("general.available", { version: tag }),
-        url: `https://github.com/kgnbkgnb666/Aura/releases/download/${tag}/${asset}`,
+      await updateCheck?.update?.close();
+      const update = await check({ timeout: 15_000 });
+      setUpdateCheck(update
+        ? { message: t("general.available", { version: update.version }), update }
+        : { message: t("general.latest") });
+    } catch {
+      setUpdateCheck({ message: t("general.updateError") });
+    }
+  }
+  async function installUpdate(update: Update) {
+    let received = 0;
+    let total: number | undefined;
+    const downloading = w("downloadingUpdate");
+    setUpdateCheck({ message: downloading, pending: true });
+    try {
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength;
+        if (event.event === "Progress") {
+          received += event.data.chunkLength;
+          if (total) {
+            setUpdateCheck({
+              message: downloading, pending: true,
+              progress: Math.min(100, Math.floor(received * 100 / total)),
+            });
+          }
+        }
+        if (event.event === "Finished") {
+          setUpdateCheck({ message: w("installingUpdate"), pending: true });
+        }
       });
     } catch {
-      setUpdateCheck({ message: t("general.updateError"), failed: true });
+      setUpdateCheck({ message: w("updateInstallError"), update });
     }
   }
   const refresh = useCallback(async () => {
@@ -470,18 +479,13 @@ export default function App() {
         {updateCheck && (
           <div className="pref-update-result" aria-live="polite">
             <span>{updateCheck.message}</span>
-            {updateCheck.failed && (
-              <button onClick={() => void openUrl("https://github.com/kgnbkgnb666/Aura/releases/latest").catch((e) => setError(message(e)))}>
-                {t("general.openRelease")}
-              </button>
+            {updateCheck.progress !== undefined && (
+              <progress max={100} value={updateCheck.progress} aria-label={w("downloadingUpdate")} />
             )}
-            {updateCheck.url && (
-              <>
-                <button onClick={() => {
-                  if (updateCheck.url) void openUrl(updateCheck.url).catch((e) => setError(message(e)));
-                }}>{w("downloadUpdate")}</button>
-                <small>{w("updateHint")}</small>
-              </>
+            {updateCheck.update && (
+              <button onClick={() => {
+                if (updateCheck.update) void installUpdate(updateCheck.update);
+              }}>{w("installUpdate")}</button>
             )}
           </div>
         )}

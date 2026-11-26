@@ -1,0 +1,6 @@
+{
+  "identifier": "settings-updater",
+  "description": "Allow signed updates from the settings window",
+  "windows": ["main"],
+  "permissions": ["updater:default"]
+}

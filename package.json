@@ -1,7 +1,7 @@
 {
   "name": "aura",
   "private": true,
-  "version": "0.1.9",
+  "version": "0.1.10",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -17,10 +17,11 @@
     "build:sidecar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-updater": "2.12.0",
     "i18next": "^26.3.6",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

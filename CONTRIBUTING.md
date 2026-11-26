@@ -36,6 +36,12 @@ cargo check --locked --manifest-path src-tauri\Cargo.toml
 - 新行为需要测试；修复 Bug 时应先添加能复现问题的回归用例。
 - 面向用户的错误信息尽量清楚、可操作，不记录密钥和完整敏感文本。
 
+## 发布 Windows 更新
+
+发布构建时把 `TAURI_SIGNING_PRIVATE_KEY` 指向 Aura 的签名私钥。如果私钥有密码，通过 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供。私钥应保存在仓库之外。后续发行版需要沿用同一把签名密钥，已安装的客户端才能验证更新。
+
+运行 `npm run tauri:build` 后，将 NSIS 安装包和同目录生成的 `latest.json` 一并上传到对应的 GitHub Release。发布前确认清单里的版本与标签一致。
+
 ## Pull Request 检查清单
 
 - [ ] 改动范围清晰，没有夹带本地文件或无关格式化

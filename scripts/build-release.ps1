@@ -47,9 +47,28 @@ try {
         throw "Sidecar build failed with exit code $LASTEXITCODE"
     }
 
-    & npx.cmd tauri build
+    $buildArguments = @("tauri", "build")
+    if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+        $buildArguments += @("--config", (Join-Path $PSScriptRoot "tauri-signing.conf.json"))
+    }
+    & npx.cmd @buildArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Tauri build failed with exit code $LASTEXITCODE"
+    }
+    if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+        $bundle = Join-Path $root "src-tauri\target\release\bundle\nsis"
+        $asset = "Aura_${version}_x64-setup.exe"
+        $signature = (Get-Content -LiteralPath (Join-Path $bundle "$asset.sig") -Raw).Trim()
+        $manifest = @{
+            version = $version
+            platforms = @{
+                "windows-x86_64" = @{
+                    url = "https://github.com/kgnbkgnb666/Aura/releases/download/v$version/$asset"
+                    signature = $signature
+                }
+            }
+        } | ConvertTo-Json -Depth 5
+        [IO.File]::WriteAllText((Join-Path $bundle "latest.json"), $manifest)
     }
 } finally {
     Pop-Location
