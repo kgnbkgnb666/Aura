@@ -161,7 +161,7 @@ let baseUrl = "http://127.0.0.1:8765";
 let authToken = "";
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const LONG_REQUEST_TIMEOUT_MS = 120_000;
-const SIDECAR_API_VERSION = 6;
+const SIDECAR_API_VERSION = 7;
 
 type RequestOptions = RequestInit & { timeoutMs?: number; retryAttempts?: number };
 

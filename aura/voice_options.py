@@ -22,9 +22,7 @@ def _legacy_skills():
     ]
 
 
-def default_skills():
-    skills = _legacy_skills()
-    skills[0]["instructions"] = """目标
+_PREVIOUS_HUMANIZER = """目标
 让文字符合作者和场景，例如工作群消息、邮件、报告或口语。保持原文语言、立场、事实、数字、专业术语和必要限定。
 
 编辑方法
@@ -39,6 +37,28 @@ def default_skills():
 
 输出
 只交付可直接替换选区的正文。"""
+
+
+def default_skills():
+    skills = _legacy_skills()
+    skills[0]["instructions"] = """目标
+把选中文字改成作者在这个场合确实会写的样子。先根据原文和口述要求判断读者、用途、正式程度和原有语气。工作消息突出动作和时间，邮件保留必要礼貌，说明文保留逻辑与术语。场景不明确时沿用原文语域。
+
+编辑顺序
+1. 找出原文真正要传达的事实、要求和态度。保留名称、时间、数字、单位、逻辑关系、引文、链接、术语、条件与不确定性。保留有用的 Markdown、编号和换行。用户明确要求的改变优先。
+2. 逐句判断是否提供信息。删除只负责开场、过渡或夸大的空话，例如没有后续说明的「值得注意的是」或缺乏证据的「具有深远意义」。只用原文已有的动作、对象和结果补足表达。删掉泛泛的评价后如果没有实质内容，就到此为止。
+3. 识别连续的模板句：机械三段式、重复的总结、泛指「多方认为」、不必要的「不仅……更……」、刻意换同义词。按实际意思合并或拆分。因果、转折和并列关系明确时，使用最自然的连接方式。
+4. 优先写清谁做什么。不知道主语时保持原有范围。长句承载多个动作时拆开，短句能说明白就留短。自然的措辞和作者的习惯用语原样保留。报告和专业说明可以正式，私聊和群消息可以直接。
+5. 不添加经历、情绪、引用、来源、数据或建议来制造真实感。不要把「可能」「预计」「部分」写成确定结论，不替作者承诺。不要靠网络梗、错别字、故意不规则的标点来模仿真人。
+6. 交付前默读一遍。确认事实、范围和语气未被改偏，删掉重写时新加的套话。原文已经自然时，允许只改少数地方或保留原句。
+
+示例
+「为进一步提升协同效率，我们计划在周五前完成事项汇总。」→「我们计划在周五前汇总这些事项。」
+「此次调整意义重大。它可能影响部分 2 月数据，但不会改变 1 月的统计口径。」→「这次调整可能影响部分 2 月数据。1 月的统计口径不变。」
+「陈老师您好，想请您确认明天下午三点是否方便开会。」→ 保留原句。
+
+输出
+只输出可直接替换选区的正文。"""
     skills[1]["instructions"] = """目标
 把原文和口述要求整理成能直接交给 Agent 的任务说明。根据任务大小决定篇幅，一句话能交代清楚的任务可用一段写完。
 
@@ -60,7 +80,12 @@ def default_skills():
 def upgrade_default_skills(skills):
     for old, new in zip(_legacy_skills(), default_skills()):
         for skill in skills:
-            if isinstance(skill, dict) and all(skill.get(field) == old[field] for field in ("name", "intent", "instructions")):
+            if not isinstance(skill, dict) or any(skill.get(field) != old[field] for field in ("name", "intent")):
+                continue
+            previous = [old["instructions"]]
+            if old["name"] == "去 AI 味":
+                previous.append(_PREVIOUS_HUMANIZER)
+            if skill.get("instructions") in previous:
                 skill["instructions"] = new["instructions"]
     return skills
 

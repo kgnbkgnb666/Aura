@@ -23,6 +23,7 @@ import {
   Copy,
   History,
   Github,
+  RefreshCw,
   Keyboard,
   Mic,
   Monitor,
@@ -50,6 +51,13 @@ import { setUiLanguage, UI_LANGUAGES, type UiLanguage } from "./i18n";
 import "./preferences.css";
 
 const labels = {
+  downloadUpdate: ["下载安装包", "下載安裝程式", "Download update", "更新をダウンロード"],
+  updateHint: [
+    "下载后运行安装包并覆盖安装到原目录。",
+    "下載後執行安裝程式並覆蓋安裝到原目錄。",
+    "Run the downloaded installer and keep the existing install location.",
+    "ダウンロード後、現在のインストール先に上書きインストールしてください。",
+  ],
   inputLevel: ["输入检测", "輸入檢測", "Input check", "入力の確認"],
   skills: ["改写 Skill", "改寫 Skill", "Rewrite skills", "書き換えスキル"],
   skillsHint: [
@@ -246,6 +254,9 @@ export default function App() {
   const [state, setState] = useState<AppState>();
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [version, setVersion] = useState("");
+  const [updateCheck, setUpdateCheck] = useState<{
+    message: string; url?: string; pending?: boolean;
+  }>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [mic, setMic] = useState("");
@@ -304,6 +315,39 @@ export default function App() {
       s?.ui_language || i18n.language
     ] ?? 0;
   const w: Words = (key) => labels[key][lang];
+  async function checkUpdates() {
+    setUpdateCheck({ message: t("general.checking"), pending: true });
+    try {
+      const response = await fetch("https://api.github.com/repos/kgnbkgnb666/Aura/releases/latest", {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.status === 404) {
+        setUpdateCheck({ message: t("general.noRelease") });
+        return;
+      }
+      if (!response.ok) throw new Error("Release lookup failed");
+      const release: { tag_name: string; assets: { name: string; state: string }[] } = await response.json();
+      const parse = (tag: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(tag)?.slice(1).map(Number);
+      const remote = parse(release.tag_name);
+      const local = parse(version);
+      if (!remote || !local) throw new Error("Invalid release version");
+      const difference = remote.findIndex((value, index) => value !== local[index]);
+      if (difference === -1 || remote[difference] < local[difference]) {
+        setUpdateCheck({ message: t("general.latest") });
+        return;
+      }
+      const asset = `Aura_${remote.join(".")}_x64-setup.exe`;
+      if (!release.assets.some((item) => item.name === asset && item.state === "uploaded")) {
+        throw new Error("Windows installer unavailable");
+      }
+      setUpdateCheck({
+        message: t("general.available", { version: release.tag_name }),
+        url: `https://github.com/kgnbkgnb666/Aura/releases/download/${release.tag_name}/${asset}`,
+      });
+    } catch {
+      setUpdateCheck({ message: t("general.updateError") });
+    }
+  }
   const refresh = useCallback(async () => {
     const id = ++generation.current;
     try {
@@ -416,11 +460,33 @@ export default function App() {
             className="pref-github"
             aria-label="Aura GitHub"
             title="Aura GitHub"
-            onClick={() => void openUrl("https://github.com/kgnbkgnb666/Aura")}
+            onClick={() => void openUrl("https://github.com/kgnbkgnb666/Aura").catch((e) => setError(message(e)))}
           >
             <Github size={14} />
           </button>
+          <button
+            className="pref-update"
+            aria-label={t("general.checkUpdates")}
+            title={t("general.checkUpdates")}
+            disabled={!version || updateCheck?.pending}
+            onClick={() => void checkUpdates()}
+          >
+            <RefreshCw size={14} />
+          </button>
         </footer>
+        {updateCheck && (
+          <div className="pref-update-result" aria-live="polite">
+            <span>{updateCheck.message}</span>
+            {updateCheck.url && (
+              <>
+                <button onClick={() => {
+                  if (updateCheck.url) void openUrl(updateCheck.url).catch((e) => setError(message(e)));
+                }}>{w("downloadUpdate")}</button>
+                <small>{w("updateHint")}</small>
+              </>
+            )}
+          </div>
+        )}
       </aside>
       <article className="pref-content" key={page}>
         <header>
@@ -642,7 +708,6 @@ export default function App() {
                 w={w}
                 s={s}
                 run={run}
-                speech={speech}
                 update={setState}
               />
             )}
@@ -658,13 +723,11 @@ function Services({
   w,
   s,
   run,
-  speech,
   update,
 }: {
   w: Words;
   s: Settings;
   run: Run;
-  speech: (v: Partial<Settings>) => Promise<void>;
   update: (v: AppState) => void;
 }) {
   const { t } = useTranslation();
@@ -679,13 +742,16 @@ function Services({
   };
   async function save(test: boolean) {
     const next = await api.saveLlm({
-      ...draft,
+      ark_api_key: draft.ark_api_key || "",
+      asr_api_key: asrKey.trim(),
+      stt_provider: "doubao-asr",
       llm_provider: "doubao",
       llm_base_url: "https://ark.cn-beijing.volces.com/api/v3",
       llm_model: "doubao-seed-2-0-mini-260428",
     });
     update(next.state);
     setDraft(next.state.settings);
+    setAsrKey(next.state.settings.asr_api_key || "");
     if (test) {
       const result = await api.testLlm();
       if (!result.ok) throw new Error(t(result.error || "llm.testFailed"));
@@ -701,21 +767,18 @@ function Services({
         >
           <span className="model-fixed">豆包流式 ASR 2.0</span>
         </Row>
-        <>
           <Row title="豆包 ASR API Key">
             <input
               type="password"
               autoComplete="off"
               aria-label="豆包 ASR API Key"
               value={asrKey}
-              onChange={(e) => setAsrKey(e.target.value)}
+              onChange={(e) => {
+                setStatus("");
+                setAsrKey(e.target.value);
+              }}
             />
-            <button disabled={asrKey.trim() === (s.asr_api_key || "")} onClick={() => void run(async () => {
-              await speech({ asr_api_key: asrKey.trim() });
-              setAsrKey(asrKey.trim() ? "********" : "");
-            })}>{t("common.save")}</button>
           </Row>
-        </>
       </Section>
       <Section title={w("text")} icon={<SlidersHorizontal size={16} />}>
         <Row title={w("provider")}>

@@ -575,8 +575,15 @@ class AuraSidecar:
                     settings.llm_model = "deepseek-v4-flash"
             settings.llm_temperature = float(payload.get("llm_temperature", settings.llm_temperature))
             settings.llm_timeout_seconds = int(payload.get("llm_timeout_seconds", settings.llm_timeout_seconds))
-            self.service.compiler = PromptCompiler(self.service._build_llm())
+            switch_to_doubao = payload.get("stt_provider") == "doubao-asr" and settings.stt_provider != "doubao-asr"
+            if "asr_api_key" in payload and payload["asr_api_key"] != API_KEY_MASK:
+                settings.asr_api_key = str(payload["asr_api_key"] or "").strip()
+            if switch_to_doubao:
+                settings.stt_provider = "doubao-asr"
             self.settings_store.save(settings)
+            if switch_to_doubao:
+                self.service.replace_transcriber()
+            self.service.compiler = PromptCompiler(self.service._build_llm())
             self.latest_status = "LLM 设置已保存"
             self.logs.info("settings", "LLM settings saved")
             return {"state": self.state()}
@@ -1058,7 +1065,7 @@ def build_handler(
                     self._send({
                         "ok": True,
                         "app": "Aura",
-                        "api_version": 6,
+                        "api_version": 7,
                         "parent_pid": parent_pid,
                     })
                 elif path == "/api/state":

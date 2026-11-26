@@ -280,7 +280,7 @@ def test_http_api_requires_token_and_limits_request_body(tmp_path):
             headers={"X-Aura-Token": "test-token", "Origin": "https://evil.example"},
         )
         with urlopen(request, timeout=2) as response:
-            assert json.load(response)["api_version"] == 6
+            assert json.load(response)["api_version"] == 7
             assert response.headers.get("Access-Control-Allow-Origin") is None
 
         oversized = Request(
@@ -506,6 +506,25 @@ def test_scanning_new_skill_directory_replaces_previous_scanned_results(tmp_path
     assert {skill["name"] for skill in second["state"]["skills"]} == {"manual", "Second Skill"}
     assert {skill["name"] for skill in empty["state"]["skills"]} == {"manual"}
     assert empty["state"]["settings"]["skill_scan_dir"] == str(empty_dir)
+
+
+def test_model_service_saves_both_keys_and_retains_masked_key(tmp_path):
+    app = local_app(tmp_path)
+    payload = {
+        "llm_provider": "doubao",
+        "llm_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "llm_model": "doubao-seed-2-0-mini-260428",
+        "stt_provider": "doubao-asr",
+        "asr_api_key": " asr-test-key ",
+        "ark_api_key": "ark-test-key",
+    }
+    state = app.save_llm_settings(payload)["state"]["settings"]
+    assert state["asr_api_key"] == state["ark_api_key"] == API_KEY_MASK
+    assert app.service.transcriber.name == "doubao-asr"
+    app.save_llm_settings({**payload, "asr_api_key": API_KEY_MASK, "ark_api_key": ""})
+    saved = app.settings_store.load()
+    assert saved.asr_api_key == "asr-test-key"
+    assert saved.ark_api_key == ""
 
 
 def test_sidecar_saves_keyless_custom_llm_configuration(tmp_path):

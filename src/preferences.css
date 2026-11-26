@@ -137,17 +137,25 @@ select {
   background: var(--accent);
   border-radius: 50%;
 }
-.pref-github {
+.preferences .pref-github,
+.preferences .pref-update {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 3px;
   color: var(--muted);
-  background: transparent !important;
-  border: 0 !important;
+  background: transparent;
+  border-color: transparent;
 }
-.pref-github:hover { color: var(--ink); }
+.preferences .pref-update { margin-left: 0; }
+.pref-update-result {
+  display: grid;
+  gap: 5px;
+  padding: 6px 9px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
 .model-fixed {
   display: inline-flex;
   align-items: center;
