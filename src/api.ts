@@ -161,7 +161,7 @@ let baseUrl = "http://127.0.0.1:8765";
 let authToken = "";
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const LONG_REQUEST_TIMEOUT_MS = 120_000;
-const SIDECAR_API_VERSION = 8;
+const SIDECAR_API_VERSION = 9;
 
 type RequestOptions = RequestInit & { timeoutMs?: number; retryAttempts?: number };
 
@@ -345,7 +345,7 @@ export const api = {
   warmupStt: (signal?: AbortSignal) =>
     request<{ state: AppState }>("/api/stt/warmup", { method: "POST", body: "{}", signal }),
   testLlm: () =>
-    request<{ ok: boolean; error?: string; model?: string; provider?: string }>("/api/llm/test", {
+    request<{ ok: boolean; asr: { ok: boolean; error?: string }; llm: { ok: boolean; error?: string } }>("/api/llm/test", {
       method: "POST",
       body: "{}",
       timeoutMs: LONG_REQUEST_TIMEOUT_MS,

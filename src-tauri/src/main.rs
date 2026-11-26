@@ -172,7 +172,7 @@ fn sidecar_health(port: u16, token: &str) -> Option<SidecarHealth> {
     serde_json::from_str(body).ok()
 }
 
-const SIDECAR_API_VERSION: u32 = 8;
+const SIDECAR_API_VERSION: u32 = 9;
 
 fn sidecar_is_compatible(port: u16, token: &str) -> bool {
     sidecar_health(port, token)

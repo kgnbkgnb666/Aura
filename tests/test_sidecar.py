@@ -90,6 +90,27 @@ def test_microphone_check_only_transcribes_on_request(tmp_path, monkeypatch):
     assert calls == [audio] and not audio.exists()
 
 
+def test_model_connection_checks_asr_without_microphone_or_ark_key(tmp_path, monkeypatch):
+    import wave
+
+    app = local_app(tmp_path)
+    app.service.settings.stt_provider = "doubao-asr"
+    app.service.settings.asr_api_key = "asr-test-key"
+    app.service.settings.llm_provider = "doubao"
+    app.service.settings.llm_base_url = "https://ark.cn-beijing.volces.com/api/v3"
+
+    def transcribe(path):
+        with wave.open(str(path), "rb") as source:
+            assert source.getparams()[:3] == (1, 2, 16000)
+        return "test"
+
+    monkeypatch.setattr(app.service, "transcribe", transcribe)
+    monkeypatch.setattr(app, "test_microphone", lambda _: pytest.fail("Opened microphone"))
+    result = app.test_llm_connection({})
+    assert result["asr"] == {"ok": True}
+    assert not result["llm"]["ok"]
+
+
 def test_mic_meter_stops_without_recording_audio(tmp_path, monkeypatch):
     app = local_app(tmp_path)
     cancelled = []
@@ -310,7 +331,7 @@ def test_http_api_requires_token_and_limits_request_body(tmp_path):
             headers={"X-Aura-Token": "test-token", "Origin": "https://evil.example"},
         )
         with urlopen(request, timeout=2) as response:
-            assert json.load(response)["api_version"] == 8
+            assert json.load(response)["api_version"] == 9
             assert response.headers.get("Access-Control-Allow-Origin") is None
 
         oversized = Request(

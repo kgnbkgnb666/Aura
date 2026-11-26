@@ -7,7 +7,7 @@ a = Analysis(
     ['aura/sidecar_entry.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[("aura/assets/asr-test.wav", "aura/assets")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

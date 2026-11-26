@@ -55,6 +55,7 @@ history.sqlite
 *.db-wal
 *.db-shm
 *.wav
+!/aura/assets/asr-test.wav
 *.mp3
 *.flac
 *.m4a

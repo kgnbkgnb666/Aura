@@ -752,8 +752,9 @@ function Services({
     setAsrKey(next.state.settings.asr_api_key || "");
     if (test) {
       const result = await api.testLlm();
-      if (!result.ok) throw new Error(t(result.error || "llm.testFailed"));
-      setStatus(w("ready"));
+      const asr = result.asr.ok ? w("ready") : t(result.asr.error || "llm.testFailed");
+      const llm = result.llm.ok ? w("ready") : t(result.llm.error || "llm.testFailed");
+      setStatus(`${w("recognition")}：${asr} · ${w("text")}：${llm}`);
     } else setStatus(w("saved"));
   }
   return (

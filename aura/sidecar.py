@@ -626,8 +626,32 @@ class AuraSidecar:
         )
         return {"state": self.state()}
 
+    def _test_asr_connection(self) -> JsonDict:
+        settings = self.service.settings
+        if settings.stt_provider == "doubao-asr" and not settings.asr_api_key.strip():
+            return {"ok": False, "error": "请填写豆包语音控制台的 ASR API Key"}
+        try:
+            sample = Path(__file__).with_name("assets") / "asr-test.wav"
+            text = self.service.transcribe(sample).strip()
+            if text:
+                return {"ok": True}
+            return {"ok": False, "error": "服务已响应，但未识别出内置测试语音"}
+        except Exception as exc:
+            if getattr(exc, "status_code", None) in (401, 403):
+                return {"ok": False, "error": "语音服务拒绝访问，请核对 Key 和流式语音识别 2.0 小时版开通状态"}
+            if isinstance(exc, FileNotFoundError):
+                return {"ok": False, "error": "安装包缺少内置测试音频"}
+            if isinstance(exc, TimeoutError):
+                return {"ok": False, "error": "语音服务响应超时"}
+            return {"ok": False, "error": "无法完成语音识别测试，请检查网络及语音服务开通状态"}
+
     def test_llm_connection(self, _payload: JsonDict) -> JsonDict:
-        """Send a minimal request to verify LLM connectivity and report the result."""
+        asr = self._test_asr_connection()
+        llm = self._test_text_connection()
+        return {"ok": asr["ok"] and llm["ok"], "asr": asr, "llm": llm}
+
+    def _test_text_connection(self) -> JsonDict:
+        """Send a minimal independent request to verify LLM connectivity."""
         settings = self.service.settings
         is_deepseek = settings.llm_provider == "deepseek" or is_deepseek_endpoint(settings.llm_base_url)
         is_custom = not is_deepseek and settings.llm_provider != "doubao"
@@ -645,10 +669,6 @@ class AuraSidecar:
             return {"ok": False, "error": "llm.notConfigured"}
 
         try:
-            audio_check = self.test_microphone({"duration_seconds": 1.2, "keep_audio": False, "transcribe": True})
-            transcript = str(audio_check.get("transcript") or "").strip()
-            if not transcript:
-                return {"ok": False, "error": "语音识别未返回文字，请检查麦克风和 ASR 配置", "asr_ok": False, "llm_ok": False}
             from .providers.llm import OpenAICompatibleClient
 
             client = OpenAICompatibleClient(
@@ -662,10 +682,10 @@ class AuraSidecar:
             )
             response = client.chat([
                 {"role": "system", "content": "只回复 OK。"},
-                {"role": "user", "content": transcript},
+                {"role": "user", "content": "连接测试"},
             ])
             if response.strip():
-                return {"ok": True, "model": model, "provider": "custom" if is_custom else settings.llm_provider, "asr_ok": True, "llm_ok": True, "transcript": transcript}
+                return {"ok": True}
             return {"ok": False, "error": "llm.emptyResponse"}
         except Exception as exc:
             message = str(exc)
@@ -676,7 +696,7 @@ class AuraSidecar:
                 return {"ok": False, "error": "llm.timeout"}
             if "connection" in lower or "refused" in lower or "resolve" in lower or "not configured" in lower:
                 return {"ok": False, "error": "llm.connectionError"}
-            return {"ok": False, "error": message[:200]}
+            return {"ok": False, "error": "llm.testFailed"}
 
     def start_recording(self) -> JsonDict:
         with self._lock:
@@ -1081,7 +1101,7 @@ def build_handler(
                     self._send({
                         "ok": True,
                         "app": "Aura",
-                        "api_version": 8,
+                        "api_version": 9,
                         "parent_pid": parent_pid,
                     })
                 elif path == "/api/state":
