@@ -255,7 +255,7 @@ export default function App() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [version, setVersion] = useState("");
   const [updateCheck, setUpdateCheck] = useState<{
-    message: string; url?: string; pending?: boolean;
+    message: string; url?: string; pending?: boolean; failed?: boolean;
   }>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -318,17 +318,13 @@ export default function App() {
   async function checkUpdates() {
     setUpdateCheck({ message: t("general.checking"), pending: true });
     try {
-      const response = await fetch("https://api.github.com/repos/kgnbkgnb666/Aura/releases/latest", {
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (response.status === 404) {
+      const { tag } = await api.latestRelease();
+      if (!tag) {
         setUpdateCheck({ message: t("general.noRelease") });
         return;
       }
-      if (!response.ok) throw new Error("Release lookup failed");
-      const release: { tag_name: string; assets: { name: string; state: string }[] } = await response.json();
       const parse = (tag: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(tag)?.slice(1).map(Number);
-      const remote = parse(release.tag_name);
+      const remote = parse(tag);
       const local = parse(version);
       if (!remote || !local) throw new Error("Invalid release version");
       const difference = remote.findIndex((value, index) => value !== local[index]);
@@ -337,15 +333,12 @@ export default function App() {
         return;
       }
       const asset = `Aura_${remote.join(".")}_x64-setup.exe`;
-      if (!release.assets.some((item) => item.name === asset && item.state === "uploaded")) {
-        throw new Error("Windows installer unavailable");
-      }
       setUpdateCheck({
-        message: t("general.available", { version: release.tag_name }),
-        url: `https://github.com/kgnbkgnb666/Aura/releases/download/${release.tag_name}/${asset}`,
+        message: t("general.available", { version: tag }),
+        url: `https://github.com/kgnbkgnb666/Aura/releases/download/${tag}/${asset}`,
       });
     } catch {
-      setUpdateCheck({ message: t("general.updateError") });
+      setUpdateCheck({ message: t("general.updateError"), failed: true });
     }
   }
   const refresh = useCallback(async () => {
@@ -477,6 +470,11 @@ export default function App() {
         {updateCheck && (
           <div className="pref-update-result" aria-live="polite">
             <span>{updateCheck.message}</span>
+            {updateCheck.failed && (
+              <button onClick={() => void openUrl("https://github.com/kgnbkgnb666/Aura/releases/latest").catch((e) => setError(message(e)))}>
+                {t("general.openRelease")}
+              </button>
+            )}
             {updateCheck.url && (
               <>
                 <button onClick={() => {

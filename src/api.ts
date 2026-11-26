@@ -161,7 +161,7 @@ let baseUrl = "http://127.0.0.1:8765";
 let authToken = "";
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const LONG_REQUEST_TIMEOUT_MS = 120_000;
-const SIDECAR_API_VERSION = 7;
+const SIDECAR_API_VERSION = 8;
 
 type RequestOptions = RequestInit & { timeoutMs?: number; retryAttempts?: number };
 
@@ -263,6 +263,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 export type HistoryEntry = { id: string; created_at: string; raw_transcript: string; compiled_text: string; llm_provider: string };
 
 export const api = {
+  latestRelease: () => request<{ tag: string | null }>("/api/releases/latest", {
+    retryAttempts: 1,
+  }),
   importRewriteSkills: (filename:string,content:string) => request<{skills:RewriteSkill[]}>("/api/settings/skills/import", {
     method:"POST",body:JSON.stringify({filename,content})
   }),

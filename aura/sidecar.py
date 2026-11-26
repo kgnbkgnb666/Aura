@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import threading
@@ -19,6 +20,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+import requests
 
 from .voice_options import LANGUAGES, import_skills, validate_keys, validate_skills
 from .compiler import PromptCompiler
@@ -37,6 +40,19 @@ from .runtime import ProcessingJobStore, RuntimeLog
 from .service import AuraService
 
 API_KEY_MASK = "********"
+RELEASES_URL = "https://github.com/kgnbkgnb666/Aura/releases"
+
+
+def latest_release() -> JsonDict:
+    response = requests.head(f"{RELEASES_URL}/latest", timeout=8, allow_redirects=False)
+    if response.status_code == 404:
+        return {"tag": None}
+    response.raise_for_status()
+    location = response.headers.get("Location", "")
+    match = re.fullmatch(r"(?:https://github\.com)?/kgnbkgnb666/Aura/releases/tag/(v\d+\.\d+\.\d+)", location)
+    if not response.is_redirect or not match:
+        raise RuntimeError("GitHub 未返回有效的发布版本")
+    return {"tag": match.group(1)}
 MAX_REQUEST_BODY_BYTES = 1024 * 1024
 ALLOWED_WEBVIEW_ORIGINS = {
     "http://127.0.0.1:5173",
@@ -1065,11 +1081,13 @@ def build_handler(
                     self._send({
                         "ok": True,
                         "app": "Aura",
-                        "api_version": 7,
+                        "api_version": 8,
                         "parent_pid": parent_pid,
                     })
                 elif path == "/api/state":
                     self._send(app.state())
+                elif path == "/api/releases/latest":
+                    self._send(latest_release())
                 elif path == "/api/devices":
                     self._send(app.list_devices())
                 elif path == "/api/status":

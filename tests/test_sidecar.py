@@ -36,6 +36,36 @@ def test_parent_process_liveness_detection():
     assert _process_is_alive(0) is False
 
 
+def test_latest_release_reads_the_public_release_redirect(monkeypatch):
+    from requests import Response
+    from aura.sidecar import latest_release
+
+    response = Response()
+    response.status_code = 302
+    response.headers["Location"] = "https://github.com/kgnbkgnb666/Aura/releases/tag/v0.1.8"
+
+    def head(url, *, timeout, allow_redirects):
+        assert url == "https://github.com/kgnbkgnb666/Aura/releases/latest"
+        assert timeout and not allow_redirects
+        return response
+
+    monkeypatch.setattr("aura.sidecar.requests.head", head)
+    assert latest_release() == {"tag": "v0.1.8"}
+    response.headers["Location"] = "https://example.org/kgnbkgnb666/Aura/releases/tag/v0.1.8"
+    with pytest.raises(RuntimeError):
+        latest_release()
+
+
+def test_builtin_humanizer_refresh_keeps_custom_intent_and_text():
+    from aura.voice_options import _legacy_skills, default_skills, upgrade_default_skills
+
+    old = {**_legacy_skills()[0], "intent": "改成适合同事阅读的中文", "enabled": False}
+    customized = {**old, "instructions": "我的私人规则"}
+    updated, untouched = upgrade_default_skills([old.copy(), customized.copy()])
+    assert updated == {**old, "instructions": default_skills()[0]["instructions"]}
+    assert untouched == customized
+
+
 def test_microphone_check_only_transcribes_on_request(tmp_path, monkeypatch):
     app = local_app(tmp_path)
     audio = tmp_path / "mic.wav"
@@ -280,7 +310,7 @@ def test_http_api_requires_token_and_limits_request_body(tmp_path):
             headers={"X-Aura-Token": "test-token", "Origin": "https://evil.example"},
         )
         with urlopen(request, timeout=2) as response:
-            assert json.load(response)["api_version"] == 7
+            assert json.load(response)["api_version"] == 8
             assert response.headers.get("Access-Control-Allow-Origin") is None
 
         oversized = Request(

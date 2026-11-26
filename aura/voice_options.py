@@ -80,7 +80,7 @@ def default_skills():
 def upgrade_default_skills(skills):
     for old, new in zip(_legacy_skills(), default_skills()):
         for skill in skills:
-            if not isinstance(skill, dict) or any(skill.get(field) != old[field] for field in ("name", "intent")):
+            if not isinstance(skill, dict) or skill.get("name") != old["name"]:
                 continue
             previous = [old["instructions"]]
             if old["name"] == "去 AI 味":
