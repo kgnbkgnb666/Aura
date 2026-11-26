@@ -44,6 +44,8 @@ models/
 
 # User data, history, local runtime output
 /config.local.json
+*.bak
+*api key*.csv
 /.aura-local/
 config.json
 history.sqlite
