@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+from uuid import uuid4
 import threading
 import time
 import wave
@@ -25,9 +26,15 @@ class AudioRecorder:
         self,
         input_device_index: int | None = None,
         volume_callback: VolumeCallback | None = None,
+        *,
+        meter_only: bool = False,
     ) -> None:
         self.input_device_index = input_device_index
         self.volume_callback = volume_callback
+        self.meter_only = meter_only
+        self.audio_callback: Callable[[bytes], None] | None = None
+        self.id = uuid4().hex
+        self.preview_cursor = 0
         self._frames: list[bytes] = []
         self._recording = False
         self._audio = None
@@ -75,28 +82,53 @@ class AudioRecorder:
             return
         pyaudio = self._pyaudio()
         self._frames = []
-        self._recording = True
         self._audio = pyaudio.PyAudio()
-        self._stream = self._audio.open(
-            format=pyaudio.paInt16,
-            channels=self.channels,
-            rate=self.rate,
-            input=True,
-            input_device_index=self.input_device_index,
-            frames_per_buffer=self.chunk,
-        )
+        try:
+            self._stream = self._audio.open(
+                format=pyaudio.paInt16,
+                channels=self.channels,
+                rate=self.rate,
+                input=True,
+                input_device_index=self.input_device_index,
+                frames_per_buffer=self.chunk,
+            )
+        except Exception:
+            self._audio.terminate()
+            self._audio = None
+            raise
+        self._recording = True
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
 
     def _read_loop(self) -> None:
         while self._recording:
             data = self._stream.read(self.chunk, exception_on_overflow=False)
-            self._frames.append(data)
+            if not self.meter_only:
+                self._frames.append(data)
+            if self.audio_callback:
+                self.audio_callback(data)
             if self.volume_callback:
                 audio_data = np.frombuffer(data, dtype=np.int16)
                 self.volume_callback(float(np.abs(audio_data).mean()))
 
-    def stop(self, min_duration_seconds: float = 0.4, min_average_volume: float = 40) -> RecordingResult:
+    @staticmethod
+    def _boost_quiet(audio: bytes, samples, peak: int) -> bytes:
+        if 0 < peak < 8192:
+            return (samples * min(12.0, 8192 / peak)).astype(np.int16).tobytes()
+        return audio
+
+    def preview_chunk(self) -> bytes:
+        # The audio thread only appends. Advance over a fixed, non-overlapping range.
+        start = self.preview_cursor
+        end = min(len(self._frames), start + 8 * self.rate // self.chunk)
+        if (end - start) * self.chunk < self.rate * 1.4:
+            return b""
+        audio = b"".join(self._frames[start:end])
+        self.preview_cursor = end
+        samples = np.frombuffer(audio, dtype=np.int16).astype(np.int32)
+        return self._boost_quiet(audio, samples, int(np.abs(samples).max()))
+
+    def stop(self, min_duration_seconds: float = 0.4, min_average_volume: float = 40, *, boost_quiet: bool = False) -> RecordingResult:
         if not self._recording:
             raise RuntimeError("Recorder is not recording.")
         self._recording = False
@@ -120,7 +152,7 @@ class AudioRecorder:
             raise RuntimeError("No audio was recorded.")
 
         raw_audio = b"".join(self._frames)
-        samples = np.frombuffer(raw_audio, dtype=np.int16)
+        samples = np.frombuffer(raw_audio, dtype=np.int16).astype(np.int32)
         average_volume = float(np.abs(samples).mean())
         max_volume = int(np.abs(samples).max())
         duration = len(self._frames) * self.chunk / self.rate
@@ -128,6 +160,9 @@ class AudioRecorder:
             raise RuntimeError(f"Recording is too short: {duration:.2f}s")
         if average_volume < min_average_volume:
             raise RuntimeError(f"Recording volume is too low: {average_volume:.0f}")
+
+        if boost_quiet:
+            raw_audio = self._boost_quiet(raw_audio, samples, max_volume)
 
         wav_path = Path(tempfile.gettempdir()) / f"aura-{time.time_ns()}.wav"
         with wave.open(str(wav_path), "wb") as wf:
@@ -143,3 +178,21 @@ class AudioRecorder:
             average_volume=average_volume,
             max_volume=max_volume,
         )
+
+    def cancel(self) -> None:
+        """Stop capturing and release the device without producing a recording."""
+        if not self._recording:
+            return
+        self._recording = False
+        if self._thread:
+            self._thread.join(timeout=1.5)
+        try:
+            if self._stream:
+                self._stream.stop_stream()
+                self._stream.close()
+        finally:
+            if self._audio:
+                self._audio.terminate()
+            self._stream = None
+            self._audio = None
+            self._frames = []

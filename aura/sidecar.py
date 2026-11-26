@@ -9,6 +9,8 @@ import os
 import secrets
 import sys
 import threading
+import tempfile
+import wave
 import time
 import traceback
 from dataclasses import asdict, is_dataclass
@@ -18,16 +20,19 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .voice_options import LANGUAGES, import_skills, validate_keys, validate_skills
 from .compiler import PromptCompiler
 from .config import (
     DEEPSEEK_BASE_URL,
     DEEPSEEK_MODELS,
+    SUPPORTED_STT_PROVIDERS,
     SettingsStore,
     is_deepseek_endpoint,
 )
 from .models import DeviceInfo, Mode, RecordingResult, Session, Settings, Skill
 from .modes import ModeRegistry
 from .recorder import AudioRecorder
+from .providers.stt.doubao import DoubaoStream, DoubaoTranscriber
 from .runtime import ProcessingJobStore, RuntimeLog
 from .service import AuraService
 
@@ -116,8 +121,12 @@ def settings_payload(
     data = asdict(settings)
     data["deepseek_api_key"] = API_KEY_MASK if settings.deepseek_api_key else ""
     data["custom_api_key"] = API_KEY_MASK if settings.custom_api_key else ""
+    data["ark_api_key"] = API_KEY_MASK if settings.ark_api_key else ""
+    data["asr_api_key"] = API_KEY_MASK if settings.asr_api_key else ""
     data["deepseek_api_key_source"] = "config" if settings.deepseek_api_key else "unset"
     data["custom_api_key_source"] = "config" if settings.custom_api_key else "unset"
+    data["ark_api_key_source"] = "config" if settings.ark_api_key else "unset"
+    data["asr_api_key_source"] = "config" if settings.asr_api_key else "unset"
     if data.get("history_path"):
         data["history_path"] = str(data["history_path"])
     if data.get("model_cache_dir"):
@@ -243,8 +252,12 @@ class AuraSidecar:
         )
         self.logs = RuntimeLog()
         self.jobs = ProcessingJobStore()
+        self._preview_lock = threading.Lock()
         self.recorder: AudioRecorder | None = None
+        self.recording_stream: DoubaoStream | None = None
         self.last_test_wav: Path | None = None
+        self.mic_test_recorder: AudioRecorder | None = None
+        self.mic_test_volume = 0.0
         self.latest_status = "准备就绪"
         self.latest_volume = 0.0
         self._lock = threading.RLock()
@@ -286,14 +299,15 @@ class AuraSidecar:
                     "transcriber_progress": self.service.transcriber.progress,
                     "transcriber_error": self.service.transcriber.last_error,
                 },
-                "runtime": {
-                    "status": self.latest_status,
-                    "volume": self.latest_volume,
-                    "recording": self.recorder is not None,
-                    "latest_job_id": self.jobs.latest_job_id,
-                    "log_count": len(self.logs.recent()),
-                },
+                "runtime": self.runtime_status(),
             }
+
+    def runtime_status(self) -> JsonDict:
+        with self._lock:
+            return {"status": self.latest_status, "volume": self.latest_volume,
+                    "mic_test_volume": self.mic_test_volume,
+                    "recording": self.recorder is not None, "latest_job_id": self.jobs.latest_job_id,
+                    "log_count": len(self.logs.recent())}
 
     def set_status(self, message: str, level: str = "info", source: str = "runtime") -> None:
         with self._lock:
@@ -481,6 +495,22 @@ class AuraSidecar:
     def save_general_settings(self, payload: JsonDict) -> JsonDict:
         with self._lock:
             settings = self.service.settings
+            for key, choices in (("preview_mode", {"bar", "input"}), ("translation_language", LANGUAGES)):
+                if key in payload:
+                    if payload[key] not in choices:
+                        raise ValueError("不支持该设置")
+                    setattr(settings, key, payload[key])
+            if "voice_shortcuts" in payload:
+                settings.voice_shortcuts = validate_keys(payload["voice_shortcuts"])
+            if "rewrite_skills" in payload:
+                settings.rewrite_skills = validate_skills(payload["rewrite_skills"])
+            if "vocabulary" in payload:
+                words = payload["vocabulary"]
+                if not isinstance(words, list) or len(words) > 200 or any(
+                    not isinstance(word, str) or not word.strip() or len(word) > 80 for word in words
+                ):
+                    raise ValueError("词典最多 200 项，每项 1–80 个字符")
+                settings.vocabulary = list(dict.fromkeys(word.strip() for word in words))
             settings.hotkey = str(payload.get("hotkey") or settings.hotkey)
             settings.push_to_talk_key = str(payload.get("push_to_talk_key") or settings.push_to_talk_key)
             settings.auto_copy = bool(payload.get("auto_copy", settings.auto_copy))
@@ -500,14 +530,17 @@ class AuraSidecar:
             settings = self.service.settings
             previous_cache_dir = settings.model_cache_dir
             previous_provider = settings.stt_provider
-            settings.input_device_index = payload.get("input_device_index")
+            settings.input_device_index = payload.get("input_device_index", settings.input_device_index)
+            for field in ("asr_api_key", "asr_ws_url", "asr_resource_id"):
+                if field in payload and payload[field] != API_KEY_MASK:
+                    setattr(settings, field, str(payload[field] or "").strip())
             cache_dir = str(payload.get("model_cache_dir") or "").strip()
             if cache_dir:
                 settings.model_cache_dir = Path(cache_dir)
             provider = str(payload.get("stt_provider") or settings.stt_provider)
             settings.stt_provider = (
                 provider
-                if provider in {"sensevoice-small", "whisper-large-v3"}
+                if provider in SUPPORTED_STT_PROVIDERS
                 else "sensevoice-small"
             )
             if settings.model_cache_dir != previous_cache_dir or settings.stt_provider != previous_provider:
@@ -528,7 +561,7 @@ class AuraSidecar:
             settings.llm_base_url = str(payload.get("llm_base_url") or "").strip()
             settings.llm_model = str(payload.get("llm_model") or "").strip()
             # The mask means unchanged; empty input clears the selected key.
-            for field in ("deepseek_api_key", "custom_api_key"):
+            for field in ("deepseek_api_key", "custom_api_key", "ark_api_key"):
                 raw_value = payload.get(field)
                 if raw_value is not None and raw_value != API_KEY_MASK:
                     setattr(settings, field, str(raw_value).strip())
@@ -574,19 +607,25 @@ class AuraSidecar:
         """Send a minimal request to verify LLM connectivity and report the result."""
         settings = self.service.settings
         is_deepseek = settings.llm_provider == "deepseek" or is_deepseek_endpoint(settings.llm_base_url)
-        is_custom = not is_deepseek
-        api_key = settings.deepseek_api_key if is_deepseek else settings.custom_api_key
+        is_custom = not is_deepseek and settings.llm_provider != "doubao"
+        api_key = settings.deepseek_api_key if is_deepseek else settings.ark_api_key if settings.llm_provider == "doubao" else settings.custom_api_key
         base_url = (settings.llm_base_url or "").strip()
         model = (settings.llm_model or "").strip()
 
         if not base_url:
             return {"ok": False, "error": "llm.notConfigured"}
+        if settings.llm_provider == "doubao" and not api_key:
+            return {"ok": False, "error": "请先填写火山方舟 API Key"}
         if is_deepseek and not api_key:
             return {"ok": False, "error": "llm.notConfigured"}
         if is_custom and not api_key and not (base_url and model):
             return {"ok": False, "error": "llm.notConfigured"}
 
         try:
+            audio_check = self.test_microphone({"duration_seconds": 1.2, "keep_audio": False, "transcribe": True})
+            transcript = str(audio_check.get("transcript") or "").strip()
+            if not transcript:
+                return {"ok": False, "error": "语音识别未返回文字，请检查麦克风和 ASR 配置", "asr_ok": False, "llm_ok": False}
             from .providers.llm import OpenAICompatibleClient
 
             client = OpenAICompatibleClient(
@@ -596,13 +635,14 @@ class AuraSidecar:
                 temperature=0.0,
                 timeout_seconds=15,
                 allow_anonymous=is_custom and not api_key,
-                thinking_enabled=False if is_deepseek else None,
+                thinking_enabled=None if is_custom else False,
             )
             response = client.chat([
-                {"role": "user", "content": "Hello, respond with just the word: OK"}
+                {"role": "system", "content": "只回复 OK。"},
+                {"role": "user", "content": transcript},
             ])
             if response.strip():
-                return {"ok": True, "model": model, "provider": "deepseek" if is_deepseek else "custom"}
+                return {"ok": True, "model": model, "provider": "custom" if is_custom else settings.llm_provider, "asr_ok": True, "llm_ok": True, "transcript": transcript}
             return {"ok": False, "error": "llm.emptyResponse"}
         except Exception as exc:
             message = str(exc)
@@ -618,7 +658,7 @@ class AuraSidecar:
     def start_recording(self) -> JsonDict:
         with self._lock:
             if self.recorder is not None:
-                return {"state": self.state()}
+                return {"state": self.state(), "recording_id": self.recorder.id}
             self.latest_volume = 0.0
             self.latest_status = "正在录音"
             self.logs.info("audio", "Recording started")
@@ -626,27 +666,80 @@ class AuraSidecar:
                 input_device_index=self.service.settings.input_device_index,
                 volume_callback=self.set_volume,
             )
-            self.recorder.start()
-            return {"state": self.state()}
+            try:
+                provider = self.service.transcriber
+                if isinstance(provider, DoubaoTranscriber):
+                    self.recording_stream = provider.open_stream()
+                    self.recorder.audio_callback = self.recording_stream.feed
+                self.recorder.start()
+            except Exception:
+                if self.recording_stream:
+                    self.recording_stream.cancel()
+                    self.recording_stream = None
+                self.recorder = None
+                raise
+            return {"state": self.state(), "recording_id": self.recorder.id}
 
-    def stop_recording(self) -> JsonDict:
+    def preview_recording(self, payload: JsonDict) -> JsonDict:
+        if not self._preview_lock.acquire(blocking=False):
+            return {"text": ""}
+        try:
+            with self._lock:
+                recorder = self.recorder
+                if recorder is None or recorder.id != payload.get("recording_id"):
+                    return {"text": ""}
+                if self.recording_stream:
+                    return {"text": self.recording_stream.text, "snapshot": True}
+                audio = recorder.preview_chunk()
+            if not audio or not any(audio):
+                return {"text": ""}
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "preview.wav"
+                with wave.open(str(path), "wb") as wav:
+                    wav.setparams((1, 2, recorder.rate, 0, "NONE", "not compressed"))
+                    wav.writeframes(audio)
+                return {"text": self.service.transcribe(path)}
+        finally:
+            self._preview_lock.release()
+
+    def stop_recording(self, dictation: bool = False, selected: str = "", language: str = "") -> JsonDict:
         with self._lock:
             if self.recorder is None:
                 raise RuntimeError("Recorder is not recording.")
             recorder = self.recorder
             self.recorder = None
+            stream, self.recording_stream = self.recording_stream, None
             self.latest_status = "正在转录"
             self.logs.info("audio", "Recording stopped")
 
-        result = recorder.stop()
+        try:
+            result = recorder.stop(min_average_volume=1, boost_quiet=stream is None) if dictation else recorder.stop()
+        except Exception:
+            if stream:
+                stream.cancel()
+            raise
         job = self._create_job(result)
         thread = threading.Thread(
             target=self._process_recording_job,
-            args=(job["id"], result.wav_path),
+            args=(job["id"], result.wav_path, dictation, selected, language, stream),
             daemon=True,
         )
         thread.start()
         return {"job": job, "state": self.state()}
+
+    def cancel_recording(self) -> JsonDict:
+        with self._lock:
+            recorder = self.recorder
+            self.recorder = None
+            stream, self.recording_stream = self.recording_stream, None
+            self.latest_volume = 0.0
+            self.latest_status = "准备就绪"
+        if stream:
+            stream.cancel()
+        if recorder is not None:
+            recorder.cancel()
+            self.logs.info("audio", "Recording cancelled")
+        return {"state": self.state()}
 
     def _create_job(self, result: RecordingResult) -> JsonDict:
         job = self.jobs.create(recording_payload(result))
@@ -664,9 +757,9 @@ class AuraSidecar:
     def job_status(self, job_id: str) -> JsonDict:
         return {"job": self.jobs.get(job_id), "state": self.state()}
 
-    def _process_recording_job(self, job_id: str, wav_path: Path) -> None:
+    def _process_recording_job(self, job_id: str, wav_path: Path, dictation: bool = False, selected: str = "", language: str = "", stream: DoubaoStream | None = None) -> None:
         try:
-            transcript = self.service.transcribe(wav_path, on_status=self.set_status).strip()
+            transcript = (stream.finish() if stream else self.service.transcribe(wav_path, on_status=self.set_status)).strip()
             if not transcript:
                 self._update_job(
                     job_id,
@@ -678,6 +771,22 @@ class AuraSidecar:
                 )
                 self.set_status("未检测到有效语音，请靠近麦克风重试。")
                 self.logs.warning("stt", "Empty transcription – possible microphone or input-device issue")
+                return
+            if dictation:
+                self._update_job(job_id, transcript=transcript, phase="compiling")
+                output = (self.service.translate_dictation(transcript, language) if language
+                          else self.service.compose_dictation(transcript, selected))
+                with self._lock:
+                    if self.service.settings.save_history:
+                        session = self.service.current_session
+                        session.add_turn(
+                            raw_transcript=transcript, compiled_text=output,
+                            stt_provider=self.service.settings.stt_provider,
+                            llm_provider="translation" if language else "voice-edit" if selected else "dictation",
+                        )
+                        self.service.history.save_session(session)
+                    self.latest_status = "听写完成"
+                self._update_job(job_id, transcript=transcript, compiled=output, phase="done", done=True)
                 return
             self._update_job(job_id, transcript=transcript, phase="compiling")
             self.logs.info("stt", "Transcript ready", transcript)
@@ -743,16 +852,51 @@ class AuraSidecar:
             recorder.start()
             time.sleep(duration)
             result = recorder.stop(min_duration_seconds=0.1, min_average_volume=0)
-            self.last_test_wav = result.wav_path
             wav_path = result.wav_path
+            transcript = None
+            if payload.get("transcribe"):
+                transcript = self.service.transcribe(wav_path, on_status=self.set_status).strip()
+            if payload.get("keep_audio", True):
+                self.last_test_wav = wav_path
+            else:
+                wav_path.unlink(missing_ok=True)
             self.set_status("麦克风测试完成")
             self.logs.info("audio", "Microphone test completed", json.dumps(recording_payload(result), ensure_ascii=False))
-            return {"recording": recording_payload(result), "state": self.state()}
+            return {"recording": recording_payload(result), "state": self.state(), "transcript": transcript}
         except Exception:
             self.logs.error("audio", "Microphone test failed")
             if wav_path and wav_path.exists():
                 wav_path.unlink(missing_ok=True)
             raise
+
+    def start_microphone_test(self) -> JsonDict:
+        with self._lock:
+            if self.mic_test_recorder is None:
+                self.mic_test_volume = 0.0
+                recorder = AudioRecorder(
+                    input_device_index=self.service.settings.input_device_index,
+                    volume_callback=self._set_mic_test_volume,
+                    meter_only=True,
+                )
+                recorder.start()
+                self.mic_test_recorder = recorder
+        return {"testing": True}
+
+    def _set_mic_test_volume(self, volume: float) -> None:
+        with self._lock:
+            self.mic_test_volume = volume
+
+    def stop_microphone_test(self) -> JsonDict:
+        with self._lock:
+            recorder = self.mic_test_recorder
+            self.mic_test_recorder = None
+        try:
+            if recorder is not None:
+                recorder.cancel()
+        finally:
+            with self._lock:
+                self.mic_test_volume = 0.0
+        return {"testing": False}
 
     def transcribe_test_audio(self) -> JsonDict:
         if not self.last_test_wav or not self.last_test_wav.exists():
@@ -812,9 +956,22 @@ class AuraSidecar:
             ]
         }
 
+    def history_entries(self, payload: JsonDict) -> JsonDict:
+        rows = self.service.history.entries(str(payload.get("query") or ""), max(0, int(payload.get("offset", 0))))
+        return {"entries": rows[:40], "more": len(rows) > 40}
+
+    def delete_entry(self, payload: JsonDict) -> JsonDict:
+        entry_id = str(payload.get("id") or "")
+        with self._lock:
+            session = self.service.current_session
+            self.service.history.delete_entry(entry_id)
+            session.turns[:] = [turn for turn in session.turns if turn.id != entry_id]
+            return {"state": self.state()}
+
     def clear_history(self) -> JsonDict:
         with self._lock:
             self.service.history.clear()
+            self.service.current_session.turns.clear()
             self.latest_status = "历史已清空"
             self.logs.warning("history", "History cleared")
             return {"state": self.state()}
@@ -901,7 +1058,7 @@ def build_handler(
                     self._send({
                         "ok": True,
                         "app": "Aura",
-                        "api_version": 5,
+                        "api_version": 6,
                         "parent_pid": parent_pid,
                     })
                 elif path == "/api/state":
@@ -909,7 +1066,7 @@ def build_handler(
                 elif path == "/api/devices":
                     self._send(app.list_devices())
                 elif path == "/api/status":
-                    self._send(app.state()["runtime"])
+                    self._send(app.runtime_status())
                 elif path == "/api/logs":
                     self._send(app.recent_logs())
                 elif path.startswith("/api/jobs/"):
@@ -935,6 +1092,7 @@ def build_handler(
                     "/api/modes": app.save_modes,
                     "/api/skills/scan": app.scan_skills,
                     "/api/skills/save": app.save_skills,
+                    "/api/settings/skills/import": import_skills,
                     "/api/settings/general": app.save_general_settings,
                     "/api/settings/speech": app.save_speech_settings,
                     "/api/settings/llm": app.save_llm_settings,
@@ -943,12 +1101,18 @@ def build_handler(
                     "/api/turn/update": app.update_latest_turn,
                     "/api/clarity/assess": app.assess_clarity,
                     "/api/clarity/questions": app.generate_questions,
+                    "/api/record/preview": app.preview_recording,
                     "/api/record/start": lambda _: app.start_recording(),
-                    "/api/record/stop": lambda _: app.stop_recording(),
+                    "/api/record/stop": lambda payload: app.stop_recording(dictation=payload.get("dictation") is True, selected=str(payload.get("selected") or ""), language=str(payload.get("language") or "")),
+                    "/api/record/cancel": lambda _: app.cancel_recording(),
                     "/api/stt/warmup": lambda _: app.warm_up_stt(),
                     "/api/llm/test": app.test_llm_connection,
                     "/api/microphone/test": app.test_microphone,
+                    "/api/microphone/start": lambda _: app.start_microphone_test(),
+                    "/api/microphone/stop": lambda _: app.stop_microphone_test(),
                     "/api/transcribe/test": lambda _: app.transcribe_test_audio(),
+                    "/api/history/entries": app.history_entries,
+                    "/api/history/delete-entry": app.delete_entry,
                     "/api/history/delete": app.delete_history,
                     "/api/history/clear": lambda _: app.clear_history(),
                     "/api/logs/clear": lambda _: app.clear_logs(),

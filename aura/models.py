@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .voice_options import DEFAULT_KEYS, default_skills
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -51,7 +53,10 @@ class Settings:
     hotkey: str = "<ctrl>+<shift>+<space>"
     push_to_talk_key: str = "space"
     input_device_index: int | None = None
-    stt_provider: str = "sensevoice-small"
+    stt_provider: str = "deepseek-asr"
+    asr_api_key: str = ""
+    asr_ws_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+    asr_resource_id: str = "volc.seedasr.sauc.duration"
     model_cache_dir: Path | None = None
     ui_theme: str = "morning"
     ui_language: str = "zh-CN"
@@ -60,6 +65,7 @@ class Settings:
     deepseek_api_key: str = ""
     custom_api_key: str = ""
     llm_model: str = "deepseek-v4-flash"
+    ark_api_key: str = ""
     llm_thinking_enabled: bool = False
     llm_temperature: float = 0.2
     llm_timeout_seconds: int = 60
@@ -67,6 +73,11 @@ class Settings:
     history_path: Path | None = None
     skills: list[Skill] = field(default_factory=list)
     skill_scan_dir: str = ""
+    preview_mode: str = "bar"
+    translation_language: str = "en"
+    voice_shortcuts: dict = field(default_factory=lambda: dict(DEFAULT_KEYS))
+    rewrite_skills: list = field(default_factory=default_skills)
+    vocabulary: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from .models import Settings, Skill
+from .voice_options import upgrade_default_skills
 
 
 LOCAL_CONFIG_NAME = "config.local.json"
 LOCAL_DATA_DIR_NAME = ".aura-local"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
-SUPPORTED_STT_PROVIDERS = {"sensevoice-small", "whisper-large-v3"}
+SUPPORTED_STT_PROVIDERS = {"doubao-asr", "deepseek-asr", "sensevoice-small", "whisper-large-v3"}
 SUPPORTED_UI_THEMES = {"morning", "night"}
 SUPPORTED_UI_LANGUAGES = {"zh-CN", "zh-TW", "en", "ja"}
 
@@ -130,6 +131,20 @@ class SettingsStore:
             except (OSError, json.JSONDecodeError) as exc:
                 raise RuntimeError(f"Invalid local configuration file: {self.path}") from exc
 
+        # Environment variables are useful for packaged deployments and keep
+        # provider credentials out of source files.
+        for env_name, field in (("ARK_API_KEY", "ark_api_key"), ("ARK_BASE_URL", "llm_base_url"),
+                                ("ARK_MODEL", "llm_model"), ("ASR_API_KEY", "asr_api_key"),
+                                ("ASR_WS_URL", "asr_ws_url"), ("ASR_RESOURCE_ID", "asr_resource_id")):
+            if os.environ.get(env_name) and not data.get(field):
+                data[field] = os.environ[env_name]
+        if os.environ.get("ARK_API_KEY") and "llm_provider" not in data:
+            data["llm_provider"] = "doubao"
+            data.setdefault("llm_base_url", "https://ark.cn-beijing.volces.com/api/v3")
+            data.setdefault("llm_model", "doubao-seed-2-0-mini-260428")
+        if os.environ.get("ASR_API_KEY") and "stt_provider" not in data:
+            data["stt_provider"] = "doubao-asr"
+
         # Consolidate legacy built-in provider choices into the single DeepSeek default.
         # Non-DeepSeek endpoints remain available through the custom compatible interface.
         configured_base_url = str(data.get("llm_base_url") or "")
@@ -151,6 +166,8 @@ class SettingsStore:
                     value = Path(value)
                 if key == "skills" and value:
                     value = [Skill(**item) for item in value if isinstance(item, dict)]
+                if key == "rewrite_skills" and isinstance(value, list):
+                    value = upgrade_default_skills(value)
                 setattr(settings, key, value)
 
         settings.app_name = "Aura"

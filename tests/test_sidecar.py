@@ -11,6 +11,7 @@ from aura.config import SettingsStore
 from aura.models import RecordingResult
 from aura.providers.llm import OpenAICompatibleClient
 from aura.providers.llm.base import UnsupportedLLMCapabilityError
+from aura.recorder import AudioRecorder
 from aura.sidecar import (
     API_KEY_MASK,
     MAX_REQUEST_BODY_BYTES,
@@ -33,6 +34,48 @@ def local_app(tmp_path):
 def test_parent_process_liveness_detection():
     assert _process_is_alive(os.getpid()) is True
     assert _process_is_alive(0) is False
+
+
+def test_microphone_check_only_transcribes_on_request(tmp_path, monkeypatch):
+    app = local_app(tmp_path)
+    audio = tmp_path / "mic.wav"
+    calls = []
+    monkeypatch.setattr("aura.sidecar.time.sleep", lambda _: None)
+    monkeypatch.setattr(AudioRecorder, "start", lambda recorder: recorder.volume_callback(300))
+
+    def stop(recorder, **kwargs):
+        audio.write_bytes(b"fixture")
+        return RecordingResult(audio, 1, 300, 900)
+
+    def transcribe(path, **kwargs):
+        assert path.read_bytes() == b"fixture"
+        calls.append(path)
+        return "测试成功"
+
+    monkeypatch.setattr(AudioRecorder, "stop", stop)
+    monkeypatch.setattr(app.service, "transcribe", transcribe)
+    assert app.test_microphone({"keep_audio": False})["transcript"] is None
+    assert not calls and not audio.exists()
+    assert app.test_microphone({"keep_audio": False, "transcribe": True})["transcript"] == "测试成功"
+    assert calls == [audio] and not audio.exists()
+
+
+def test_mic_meter_stops_without_recording_audio(tmp_path, monkeypatch):
+    app = local_app(tmp_path)
+    cancelled = []
+
+    def start(recorder):
+        assert recorder.meter_only
+        recorder.volume_callback(300)
+
+    monkeypatch.setattr(AudioRecorder, "start", start)
+    monkeypatch.setattr(AudioRecorder, "cancel", lambda recorder: cancelled.append(recorder))
+    assert app.start_microphone_test() == {"testing": True}
+    assert app.runtime_status()["mic_test_volume"] == 300
+    assert app.runtime_status()["volume"] == 0
+    assert app.stop_microphone_test() == {"testing": False}
+    assert len(cancelled) == 1
+    assert app.runtime_status()["mic_test_volume"] == 0
 
 
 def test_sidecar_logging_is_rotating_persistent_and_not_duplicated(tmp_path, monkeypatch):
@@ -81,8 +124,9 @@ def test_sidecar_state_has_frontend_contract(tmp_path):
     assert state["runtime"]["latest_job_id"] == ""
     assert state["runtime"]["log_count"] >= 1
     assert "llm_provider" in state["service"]
-    assert state["service"]["transcriber_status"] == "not_loaded"
-    assert state["service"]["transcriber_progress"] == 0
+    assert state["service"]["stt_provider"] == "deepseek-asr"
+    assert state["service"]["transcriber_status"] == "ready"
+    assert state["service"]["transcriber_progress"] == 100
 
 
 def test_sidecar_job_contract(tmp_path):
@@ -100,6 +144,65 @@ def test_sidecar_job_contract(tmp_path):
     assert payload["job"]["transcript"] == "hello"
     assert payload["job"]["compiled"] == "compiled"
     assert payload["job"]["phase"] == "compiling"
+
+
+def test_voice_edit_recovers_final_text_across_restart(tmp_path, monkeypatch):
+    app = local_app(tmp_path)
+    monkeypatch.setattr(app.service, "transcribe", lambda *a, **kw: "改成周四")
+    def compose(spoken, selected):
+        assert (spoken, selected) == ("改成周四", "周三开会")
+        return "周四开会"
+
+    monkeypatch.setattr(app.service, "compose_dictation", compose)
+    result = RecordingResult(tmp_path / "demo.wav", 1.0, 100.0, 500)
+    job = app._create_job(result)
+    app._process_recording_job(job["id"], result.wav_path, dictation=True, selected="周三开会")
+    assert app.job_status(job["id"])["job"]["compiled"] == "周四开会"
+    entry, = local_app(tmp_path).history_entries({})["entries"]
+    assert entry["compiled_text"] == "周四开会"
+
+
+def test_settings_dictionary_persists_and_reaches_text_model(tmp_path, monkeypatch):
+    app = local_app(tmp_path)
+    app.save_general_settings({"vocabulary": [" WebView2 ", "WebView2"]})
+    restored = local_app(tmp_path)
+    assert restored.state()["settings"]["vocabulary"] == ["WebView2"]
+    llm = restored.service.compiler.llm
+    monkeypatch.setattr(llm, "name", "test")
+    def chat(messages):
+        assert "WebView2" in messages[0]["content"]
+        return "WebView2"
+    monkeypatch.setattr(llm, "chat", chat)
+    assert restored.service.compose_dictation("web view two") == "WebView2"
+
+
+def test_history_search_delete_and_disabled_save(tmp_path, monkeypatch):
+    app = local_app(tmp_path)
+    monkeypatch.setattr(app.service, "transcribe", lambda *args, **kwargs: "原话")
+    monkeypatch.setattr(app.service, "compose_dictation", lambda *args: "整理结果")
+    def record():
+        wav = tmp_path / "test.wav"
+        job = app._create_job(RecordingResult(wav, 1, 100, 100))
+        app._process_recording_job(job["id"], wav, True)
+    record()
+    row, = app.history_entries({"query": "结果"})["entries"]
+    assert row["raw_transcript"] == "原话"
+    app.delete_entry({"id": row["id"]})
+    app.save_general_settings({"save_history": False})
+    record()
+    app.save_general_settings({"save_history": True})
+    record()
+    rows = app.history_entries({"query": "原话"})["entries"]
+    assert len(rows) == 1 and rows[0]["id"] != row["id"]
+    app.clear_history()
+    assert app.history_entries({})["entries"] == []
+
+
+def test_unconfigured_model_keeps_dictation_and_declines_edit(tmp_path):
+    service = local_app(tmp_path).service
+    assert service.compose_dictation("周四开会") == "周四开会"
+    with pytest.raises(RuntimeError, match="配置文字模型"):
+        service.compose_dictation("改成周四", "周三开会")
 
 
 def test_sidecar_logs_contract(tmp_path):
@@ -177,7 +280,7 @@ def test_http_api_requires_token_and_limits_request_body(tmp_path):
             headers={"X-Aura-Token": "test-token", "Origin": "https://evil.example"},
         )
         with urlopen(request, timeout=2) as response:
-            assert json.load(response)["api_version"] == 5
+            assert json.load(response)["api_version"] == 6
             assert response.headers.get("Access-Control-Allow-Origin") is None
 
         oversized = Request(

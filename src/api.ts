@@ -15,6 +15,8 @@ export type Mode = {
   base_mode_id: string;
 };
 
+export type RewriteSkill = {name: string; intent: string; instructions: string; enabled: boolean};
+
 export type Settings = {
   app_name: string;
   mode_id: string;
@@ -25,6 +27,9 @@ export type Settings = {
   push_to_talk_key: string;
   input_device_index: number | null;
   stt_provider: string;
+  asr_api_key: string;
+  asr_ws_url: string;
+  asr_resource_id: string;
   model_cache_dir: string | null;
   ui_theme: "morning" | "night";
   ui_language: "zh-CN" | "zh-TW" | "en" | "ja";
@@ -32,6 +37,7 @@ export type Settings = {
   llm_base_url: string;
   deepseek_api_key: string;
   custom_api_key: string;
+  ark_api_key: string;
   deepseek_api_key_source?: "config" | "unset";
   custom_api_key_source?: "config" | "unset";
   llm_model: string;
@@ -42,6 +48,11 @@ export type Settings = {
   history_path: string | null;
   skills: Skill[];
   skill_scan_dir: string;
+  preview_mode?: "bar" | "input";
+  translation_language?: string;
+  voice_shortcuts?: Record<"dictate" | "translate", string>;
+  rewrite_skills?: RewriteSkill[];
+  vocabulary?: string[];
 };
 
 export const autostart = {
@@ -71,6 +82,7 @@ export type DeviceInfo = {
 export type RuntimeState = {
   status: string;
   volume: number;
+  mic_test_volume?: number;
   recording: boolean;
   latest_job_id: string;
   log_count: number;
@@ -149,6 +161,7 @@ let baseUrl = "http://127.0.0.1:8765";
 let authToken = "";
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const LONG_REQUEST_TIMEOUT_MS = 120_000;
+const SIDECAR_API_VERSION = 6;
 
 type RequestOptions = RequestInit & { timeoutMs?: number; retryAttempts?: number };
 
@@ -168,7 +181,7 @@ export async function ensureSidecar(): Promise<void> {
     authToken = "";
   }
   const health = await request<{ ok: boolean; app?: string; api_version?: number }>("/api/health");
-  if (!health.ok || health.app !== "Aura" || health.api_version !== 5) {
+  if (!health.ok || health.app !== "Aura" || health.api_version !== SIDECAR_API_VERSION) {
     throw new Error("Aura sidecar protocol mismatch. Stop old sidecar processes and restart Aura.");
   }
 }
@@ -179,6 +192,18 @@ export function hideMainWindow(): Promise<void> {
 
 export function setTrayLanguage(language: Settings["ui_language"]): Promise<void> {
   return invoke<void>("set_tray_language", { language });
+}
+
+export function showMainWindow(tab = "general"): Promise<void> {
+  return invoke<void>("show_main", { tab });
+}
+
+export function copyText(text: string): Promise<void> {
+  return invoke<void>("copy_text", { text });
+}
+
+export function insertText(text: string): Promise<boolean> {
+  return invoke<boolean>("insert_text", { text });
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -235,15 +260,29 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return payload as T;
 }
 
+export type HistoryEntry = { id: string; created_at: string; raw_transcript: string; compiled_text: string; llm_provider: string };
+
 export const api = {
+  importRewriteSkills: (filename:string,content:string) => request<{skills:RewriteSkill[]}>("/api/settings/skills/import", {
+    method:"POST",body:JSON.stringify({filename,content})
+  }),
+  entries: (query: string, offset: number) => request<{entries: HistoryEntry[]; more: boolean}>("/api/history/entries", {
+    method: "POST", body: JSON.stringify({ query, offset })
+  }),
+  deleteEntry: (id: string) => request<{state: AppState}>("/api/history/delete-entry", {
+    method: "POST", body: JSON.stringify({ id })
+  }),
   state: (signal?: AbortSignal) => request<AppState>("/api/state", { signal }),
   devices: (signal?: AbortSignal) => request<{ devices: DeviceInfo[] }>("/api/devices", { signal }),
   status: (signal?: AbortSignal, retryAttempts = 3) =>
     request<RuntimeState>("/api/status", { signal, retryAttempts }),
   startRecording: () =>
-    request<{ state: AppState }>("/api/record/start", { method: "POST", body: "{}" }),
-  stopRecording: () =>
-    request<RecordStopResponse>("/api/record/stop", { method: "POST", body: "{}" }),
+    request<{ state: AppState; recording_id: string }>("/api/record/start", { method: "POST", body: "{}" }),
+  previewRecording: (id:string, signal:AbortSignal) => request<{text:string; snapshot?:boolean}>("/api/record/preview", {method:"POST",body:JSON.stringify({recording_id:id}),signal,timeoutMs:30000}),
+  stopRecording: (dictation = false, selected = "", language = "") =>
+    request<RecordStopResponse>("/api/record/stop", { method: "POST", body: JSON.stringify({ dictation, selected, language }) }),
+  cancelRecording: () =>
+    request<{ state: AppState }>("/api/record/cancel", { method: "POST", body: "{}" }),
   job: (jobId: string, signal?: AbortSignal) => request<{ job: ProcessingJob; state: AppState }>(`/api/jobs/${jobId}`, { signal, retryAttempts: 1 }),
   newSession: (modeId: string, signal?: AbortSignal) =>
     request<{ state: AppState }>("/api/session/new", {
@@ -335,11 +374,16 @@ export const api = {
       timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       signal,
     }),
-  testMicrophone: () =>
-    request<{ recording: RecordingResult; state: AppState }>("/api/microphone/test", {
+  testMicrophone: (transcribe = false) =>
+    request<{ recording: RecordingResult; state: AppState; transcript: string | null }>("/api/microphone/test", {
       method: "POST",
-      body: JSON.stringify({ duration_seconds: 3 })
+      body: JSON.stringify({ duration_seconds: 3, keep_audio: false, transcribe }),
+      timeoutMs: transcribe ? LONG_REQUEST_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS,
     }),
+  startMicrophoneTest: () =>
+    request<{ testing: boolean }>("/api/microphone/start", { method: "POST", body: "{}" }),
+  stopMicrophoneTest: () =>
+    request<{ testing: boolean }>("/api/microphone/stop", { method: "POST", body: "{}" }),
   transcribeTest: () =>
     request<{ transcript: string; state: AppState }>("/api/transcribe/test", {
       method: "POST",

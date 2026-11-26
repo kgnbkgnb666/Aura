@@ -33,7 +33,7 @@ class OpenAICompatibleClient:
         return bool(self.base_url and self.model and (self.api_key or self.allow_anonymous))
 
     def _url(self) -> str:
-        suffix = "/chat/completions" if self.base_url.endswith("/v1") else "/v1/chat/completions"
+        suffix = "/chat/completions" if self.base_url.endswith(("/v1", "/api/v3")) else "/v1/chat/completions"
         return f"{self.base_url}{suffix}"
 
     def _headers(self) -> dict[str, str]:

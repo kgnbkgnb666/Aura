@@ -68,6 +68,26 @@ class HistoryStore:
                 conn.execute("alter table turns add column clarity_level text")
                 conn.execute("alter table turns add column clarity_label text")
 
+    def entries(self, query: str, offset: int) -> list[dict]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, created_at, raw_transcript, compiled_text, llm_provider FROM turns "
+                "WHERE instr(lower(raw_transcript), lower(?)) OR instr(lower(compiled_text), lower(?)) "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 41 OFFSET ?", (query, query, offset)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_entry(self, entry_id: str) -> None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT session_id FROM turns WHERE id = ?", (entry_id,)).fetchone()
+            if row:
+                conn.execute("DELETE FROM turns WHERE id = ?", (entry_id,))
+                conn.execute(
+                    "DELETE FROM sessions WHERE id = ? AND NOT EXISTS "
+                    "(SELECT 1 FROM turns WHERE session_id = sessions.id)", (row[0],)
+                )
+
     def save_session(self, session: Session) -> None:
         with self._connect() as conn:
             conn.execute(

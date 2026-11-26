@@ -6,18 +6,88 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
     time::Duration,
 };
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+mod shortcuts;
+#[cfg(windows)]
+mod tray_registration;
 
 const SIDECAR_PORTS: [u16; 4] = [8765, 8766, 8767, 8768];
+
+#[cfg(target_os = "windows")]
+mod input_target;
+
+#[cfg(target_os = "windows")]
+mod desktop_input {
+    use super::*;
+
+    use windows_sys::Win32::{
+        Foundation::{LPARAM, LRESULT, WPARAM},
+        UI::{
+
+            WindowsAndMessaging::{CallNextHookEx, GetMessageW, SetWindowsHookExW, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP},
+        },
+    };
+
+    static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+    unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code < 0 { return CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam); }
+        let event = &*(lparam as *const KBDLLHOOKSTRUCT);
+        let down = wparam == WM_KEYDOWN as usize || wparam == WM_SYSKEYDOWN as usize;
+        let up = wparam == WM_KEYUP as usize || wparam == WM_SYSKEYUP as usize;
+        if down || up {
+            let (swallow, action) = shortcuts::handle(event.vkCode, down);
+            if let (Some(app), Some(action)) = (APP.get(), action) { let _ = app.emit(action, ()); }
+            if swallow { return 1; }
+        }
+        CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    }
+
+    unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code < 0 { return CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam); }
+        let (key, down) = match wparam as u32 {
+            WM_LBUTTONDOWN => (0x1001, true), WM_LBUTTONUP => (0x1001, false),
+            WM_RBUTTONDOWN => (0x1002, true), WM_RBUTTONUP => (0x1002, false),
+            WM_MBUTTONDOWN => (0x1003, true), WM_MBUTTONUP => (0x1003, false),
+            _ => return CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam),
+        };
+        let (swallow, action) = shortcuts::handle(key, down);
+        if let (Some(app), Some(action)) = (APP.get(), action) { let _ = app.emit(action, ()); }
+        if swallow { return 1; }
+        CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    }
+
+    pub fn install(app: tauri::AppHandle) {
+        let _ = APP.set(app);
+        std::thread::spawn(|| unsafe {
+            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), std::ptr::null_mut(), 0);
+            if hook.is_null() { return; }
+            let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), std::ptr::null_mut(), 0);
+            if mouse_hook.is_null() { return; }
+            let mut message: MSG = std::mem::zeroed();
+            while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {}
+        });
+    }
+
+    pub use super::input_target::insert_text;
+
+}
+
+#[cfg(not(target_os = "windows"))]
+mod desktop_input {
+    pub fn install(_app: tauri::AppHandle) {}
+    pub fn insert_text(_text: String) -> Result<bool, String> {
+        Ok(false)
+    }
+}
 
 #[derive(Default)]
 struct SidecarState {
@@ -102,9 +172,11 @@ fn sidecar_health(port: u16, token: &str) -> Option<SidecarHealth> {
     serde_json::from_str(body).ok()
 }
 
+const SIDECAR_API_VERSION: u32 = 6;
+
 fn sidecar_is_compatible(port: u16, token: &str) -> bool {
     sidecar_health(port, token)
-        .map(|health| health.app == "Aura" && health.api_version == 5)
+        .map(|health| health.app == "Aura" && health.api_version == SIDECAR_API_VERSION)
         .unwrap_or(false)
 }
 
@@ -112,7 +184,7 @@ fn sidecar_belongs_to_current_process(port: u16, token: &str) -> bool {
     sidecar_health(port, token)
         .map(|health| {
             health.app == "Aura"
-                && health.api_version == 5
+                && health.api_version == SIDECAR_API_VERSION
                 && health.parent_pid == Some(std::process::id())
         })
         .unwrap_or(false)
@@ -367,12 +439,30 @@ fn should_hide_main_window(is_visible: bool, is_minimized: bool) -> bool {
     is_visible && !is_minimized
 }
 
+fn center_main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or(window.primary_monitor().map_err(|e| e.to_string())?);
+    let Some(monitor) = monitor else {
+        return Ok(());
+    };
+    let area = monitor.work_area();
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
+    let y = area.position.y + (area.size.height as i32 - size.height as i32) / 2;
+    window
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())
+}
+
 fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
-        window.show().map_err(|e| e.to_string())?;
         if window.is_minimized().map_err(|e| e.to_string())? {
             window.unminimize().map_err(|e| e.to_string())?;
         }
+        center_main_window(&window)?;
+        window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         window.emit("aura://shown", ()).map_err(|e| e.to_string())
     } else {
@@ -440,13 +530,110 @@ fn hide_window(app: tauri::AppHandle) -> Result<(), String> {
     hide_main_window(&app)
 }
 
-fn tray_labels(language: &str) -> (&'static str, &'static str) {
-    match language {
-        "zh-TW" => ("顯示 / 隱藏", "結束 Aura"),
-        "en" => ("Show / Hide", "Quit Aura"),
-        "ja" => ("表示 / 非表示", "Aura を終了"),
-        _ => ("显示 / 隐藏", "退出 Aura"),
+#[tauri::command]
+fn show_main(app: tauri::AppHandle, tab: String) -> Result<(), String> {
+    show_main_window(&app)?;
+    app.emit("aura://open-settings", tab).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn set_bar_visible(app: tauri::AppHandle, visible: bool, editing: Option<bool>, wide: Option<bool>, translating: Option<bool>) -> Result<Option<String>, String> {
+    let bar = app.get_webview_window("recording-bar").ok_or("听写浮窗未就绪")?;
+    let bar_width:f64 = if wide.unwrap_or(false) || translating.unwrap_or(false) { 264.0 } else { 124.0 };
+    #[cfg(target_os = "windows")]
+    let position = |point: Option<(i32, i32)>| -> Result<(), String> {
+        if let Some((x, y)) = point {
+            if let Some(monitor) = bar.monitor_from_point(x as f64, y as f64).map_err(|e| e.to_string())? {
+                let area = monitor.work_area();
+                let scale = monitor.scale_factor();
+                let width = (bar_width * scale).round() as i32;
+                let inset = ((if translating.unwrap_or(false){100.0}else{64.0}) * scale).round() as i32;
+                bar.set_position(PhysicalPosition::new(
+                    area.position.x + (area.size.width as i32 - width) / 2,
+                    area.position.y + area.size.height as i32 - inset,
+                )).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    };
+    #[cfg(target_os = "windows")]
+    let initial_point = input_target::initial_bar_point();
+    if visible {
+        bar.set_size(tauri::LogicalSize::new(bar_width, if translating.unwrap_or(false){76.0}else{40.0})).map_err(|e|e.to_string())?;
+        #[cfg(target_os = "windows")]
+        position(initial_point)?;
     }
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, SW_SHOWNOACTIVATE};
+        ShowWindow(bar.hwnd().map_err(|e| e.to_string())?.0, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
+        let (point, selected) = if visible { input_target::remember(editing.unwrap_or(false)) } else { (None, None) };
+        if visible && point != initial_point {
+            position(point)?;
+        }
+        Ok(selected)
+    }
+    #[cfg(not(target_os = "windows"))]
+    (if visible { bar.show() } else { bar.hide() }).map(|_| None).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn inline_preview(app: tauri::AppHandle, text: String) -> Result<bool,String> {
+    let window = app.get_webview_window("inline-preview").ok_or("预览窗口不可用")?;
+    #[cfg(windows)]
+    if !text.is_empty() {
+        if let Some((x,y))=input_target::preview_anchor() {
+            if let Some(monitor)=window.monitor_from_point(x as f64,y as f64).map_err(|e|e.to_string())? {
+                let area=monitor.work_area();
+                let scale=monitor.scale_factor();
+                let width=(text.chars().count() as f64*14.0+18.0).clamp(45.0,280.0);
+                window.set_size(tauri::LogicalSize::new(width,26.0)).map_err(|e|e.to_string())?;
+                let right=area.position.x + area.size.width as i32;
+                let bottom=area.position.y + area.size.height as i32;
+                window.set_position(PhysicalPosition::new(x.min(right-(width*scale) as i32).max(area.position.x),
+                    y.min(bottom-(26.0*scale) as i32).max(area.position.y))).map_err(|e|e.to_string())?;
+                window.emit("aura://draft",text).map_err(|e|e.to_string())?;
+                unsafe {windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(window.hwnd().map_err(|e|e.to_string())?.0, 4);}
+                return Ok(true);
+            }
+        }
+    }
+    #[cfg(windows)]
+    unsafe {windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(window.hwnd().map_err(|e|e.to_string())?.0,0);}
+    Ok(false)
+}
+
+#[tauri::command]
+async fn insert_text(text: String) -> Result<bool, String> {
+    desktop_input::insert_text(text)
+}
+
+#[tauri::command]
+fn set_shortcut_capture(active: bool) {
+    shortcuts::set_capture(active);
+}
+
+#[tauri::command]
+async fn undo_edit() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    return input_target::undo_edit();
+    #[cfg(not(target_os = "windows"))]
+    Ok(false)
+}
+
+#[tauri::command]
+async fn export_rewrite_skills(app: tauri::AppHandle, skills: Vec<serde_json::Value>) -> Result<(), String> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(file) = app.dialog().file().add_filter("Aura Skills", &["json"])
+        .set_file_name("aura-rewrite-skills.json").blocking_save_file() else {return Ok(());};
+    let path=file.into_path().map_err(|e|e.to_string())?;
+    let content=serde_json::to_vec_pretty(&serde_json::json!({"version":1,"skills":skills})).map_err(|e|e.to_string())?;
+    std::fs::write(path,content).map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+fn copy_text(text: String) -> Result<(), String> {
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -454,15 +641,20 @@ fn set_tray_language(app: tauri::AppHandle, language: String) -> Result<(), Stri
     let tray = app
         .tray_by_id("main")
         .ok_or_else(|| "Aura tray is unavailable".to_string())?;
-    let (toggle_label, quit_label) = tray_labels(&language);
-    let toggle_item = MenuItemBuilder::with_id("toggle", toggle_label)
+    let (settings_label, quit_label) = match language.as_str() {
+        "zh-TW" => ("設定", "結束 Aura"),
+        "en" => ("Settings", "Quit Aura"),
+        "ja" => ("設定", "Aura を終了"),
+        _ => ("设置", "退出 Aura"),
+    };
+    let settings_item = MenuItemBuilder::with_id("settings", settings_label)
         .build(&app)
         .map_err(|error| error.to_string())?;
     let quit_item = MenuItemBuilder::with_id("quit", quit_label)
         .build(&app)
         .map_err(|error| error.to_string())?;
     let menu = MenuBuilder::new(&app)
-        .item(&toggle_item)
+        .item(&settings_item)
         .separator()
         .item(&quit_item)
         .build()
@@ -472,7 +664,7 @@ fn set_tray_language(app: tauri::AppHandle, language: String) -> Result<(), Stri
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| { let _ = show_main_window(app); }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -481,30 +673,57 @@ fn main() {
         ))
         .manage(SidecarState::default())
         .invoke_handler(tauri::generate_handler![
+            shortcuts::configure_shortcuts,
             ensure_sidecar,
             toggle_window,
             hide_window,
-            set_tray_language
+            set_tray_language,
+            show_main,
+            set_bar_visible,
+            inline_preview,
+            undo_edit,
+            export_rewrite_skills,
+            copy_text,
+            insert_text
+            ,set_shortcut_capture
         ])
         .setup(|app| {
-            if let Err(error) =
-                app.global_shortcut()
-                    .on_shortcut("ctrl+shift+space", |app, _shortcut, event| {
-                        if event.state == ShortcutState::Pressed {
-                            let _ = show_main_window(app);
-                        }
-                    })
-            {
-                eprintln!("Failed to register Ctrl+Shift+Space: {error}");
+            desktop_input::install(app.handle().clone());
+
+            let overlay = WebviewWindowBuilder::new(app, "recording-bar", WebviewUrl::App("index.html?view=overlay".into()))
+                .title("Aura 听写")
+                .visible(false)
+                .inner_size(124.0, 40.0)
+                .resizable(false)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .shadow(false)
+                .focusable(false)
+                .focused(false)
+                .build()?;
+            overlay.set_ignore_cursor_events(false)?;
+            if let Some(monitor) = overlay.current_monitor()? {
+                let size = monitor.size();
+                let origin = monitor.position();
+                let width = overlay.outer_size()?.width as i32;
+                let inset = (96.0 * monitor.scale_factor()) as i32;
+                overlay.set_position(PhysicalPosition::new(origin.x + (size.width as i32 - width) / 2, origin.y + size.height as i32 - inset))?;
             }
+
+            let caption = WebviewWindowBuilder::new(app, "inline-preview", WebviewUrl::App("index.html?view=inline".into()))
+                .title("Aura 字幕").inner_size(200.0,26.0).visible(false).resizable(false).decorations(false)
+                .transparent(true).always_on_top(true).skip_taskbar(true).shadow(false).focusable(false).focused(false).build()?;
+            caption.set_ignore_cursor_events(true)?;
 
             let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))
                 .expect("Failed to load tray icon");
 
-            let toggle_item = MenuItemBuilder::with_id("toggle", "显示 / 隐藏").build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "设置").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "退出 Aura").build(app)?;
             let menu = MenuBuilder::new(app)
-                .item(&toggle_item)
+                .item(&settings_item)
                 .separator()
                 .item(&quit_item)
                 .build()?;
@@ -512,11 +731,13 @@ fn main() {
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .menu(&menu)
+                .show_menu_on_left_click(false)
                 .tooltip("Aura")
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
-                        "toggle" => {
-                            let _ = toggle_main_window(app);
+                        "settings" => {
+                            let _ = show_main_window(app);
+                            let _ = app.emit("aura://open-settings", "general");
                         }
                         "quit" => {
                             // app.exit(0) skips Drop, so explicitly stop only this app's owned child.
@@ -524,6 +745,7 @@ fn main() {
                                 state.shutdown();
                             }
 
+                            if let Some(icon) = app.tray_by_id("main") { let _ = icon.set_visible(false); }
                             app.exit(0);
                         }
                         _ => {}
@@ -536,21 +758,15 @@ fn main() {
                         ..
                     } = event
                     {
-                        let _ = toggle_main_window(tray.app_handle());
+                        let _ = show_main_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
 
-            if let Some(window) = app.get_webview_window("main") {
-                // Autostart stays hidden; an ordinary launch must explicitly own keyboard focus
-                // so Space works immediately after the WebView installs its listener.
-                if std::env::args().any(|arg| arg == "--minimized") {
-                    let _ = window.hide();
-                } else {
-                    let _ = window.show().and_then(|_| window.set_focus());
-                }
+            #[cfg(windows)]
+            if let (Ok(dir), Ok(handle)) = (app.path().app_local_data_dir(), _tray.with_inner_tray_icon(|i| i.window_handle() as usize)) {
+                tray_registration::remember(&dir.join("tray-registration.json"), handle);
             }
-
             Ok(())
         })
         .on_window_event(|window, event| {

@@ -24,7 +24,7 @@ If Aura is useful to you, please give the project a ⭐ Star.
 ## 👀 Aura in 30 seconds
 
 ```text
-Rough idea → hold Space and speak → local STT → LLM shapes the request
+Rough idea → tap Right Alt and speak → local STT → LLM shapes and inserts the request
           → goals, constraints, and acceptance criteria → paste into your agent
 ```
 
@@ -141,7 +141,7 @@ You do not need to remember every Skill name—remember what you want to accompl
 
 ## 🌟 What it does
 
-- 🎙️ Hold `Space` to record; release to transcribe and organize.
+- 🎙️ Tap `Right Alt` to start; tap again to transcribe, organize, and insert.
 - 🔒 Run speech recognition locally with SenseVoice Small or Whisper Large V3.
 - 🧠 Use the default DeepSeek setup or any OpenAI-compatible LLM endpoint.
 - 🎯 Choose Action, Decision, or Creative mode for task-specific prompting.
@@ -174,12 +174,12 @@ npm ci
 npm run tauri:dev
 ```
 
-On first launch Aura prepares the selected local speech model. Then hold `Space` and say your first idea. 🚀
+On first launch Aura prepares the selected local speech model. Then tap `Right Alt` and say your first idea. 🚀
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl + Shift + Space` | Bring Aura to the front |
-| Hold `Space` | Record; release to process |
+| Tap `Right Alt` | Start recording; tap again to process |
+| `Right Alt + Space` | Speak an edit to selected text. Tap Right Alt to finish, then click Undo to restore it. |
 | `Ctrl + N` | New session |
 | `Esc` | Hide Aura |
 
