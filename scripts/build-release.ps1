@@ -47,18 +47,26 @@ try {
         throw "Sidecar build failed with exit code $LASTEXITCODE"
     }
 
-    $buildArguments = @("tauri", "build")
-    if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-        $buildArguments += @("--config", (Join-Path $PSScriptRoot "tauri-signing.conf.json"))
-    }
-    & npx.cmd @buildArguments
+    & npx.cmd tauri build
     if ($LASTEXITCODE -ne 0) {
         throw "Tauri build failed with exit code $LASTEXITCODE"
     }
     if ($env:TAURI_SIGNING_PRIVATE_KEY) {
         $bundle = Join-Path $root "src-tauri\target\release\bundle\nsis"
         $asset = "Aura_${version}_x64-setup.exe"
-        $signature = (Get-Content -LiteralPath (Join-Path $bundle "$asset.sig") -Raw).Trim()
+        $installer = Join-Path $bundle $asset
+        $signArguments = @("tauri", "signer", "sign")
+        if (Test-Path -LiteralPath $env:TAURI_SIGNING_PRIVATE_KEY -PathType Leaf) {
+            $signArguments += @("--private-key-path", $env:TAURI_SIGNING_PRIVATE_KEY)
+        }
+        if (!$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+            $signArguments += "--password="
+        }
+        & npx.cmd @signArguments $installer
+        if ($LASTEXITCODE -ne 0) {
+            throw "Updater signature failed with exit code $LASTEXITCODE"
+        }
+        $signature = (Get-Content -LiteralPath "$installer.sig" -Raw).Trim()
         $manifest = @{
             version = $version
             platforms = @{
